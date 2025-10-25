@@ -1,0 +1,62 @@
+{
+  "name": "@mintmcqueen/gemini-mcp",
+  "version": "0.2.11",
+  "description": "Enhanced MCP server for Google Gemini 2.5 Pro with advanced file handling, batch uploads, and conversation management. Supports multimodal interactions and 40+ file processing. Includes automatic API key configuration for Claude Code and Claude Desktop.",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "gemini-mcp": "build/index.js",
+    "gemini-mcp-configure": "scripts/configure.js"
+  },
+  "files": [
+    "build/**/*",
+    "!build/test/**",
+    "scripts/**/*",
+    "README.md",
+    "ENHANCEMENTS.md",
+    "LICENSE",
+    ".env.example",
+    "claude_desktop_config.example.json"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/postbuild.js",
+    "watch": "tsc --watch",
+    "start": "node build/index.js",
+    "dev": "tsc --watch & nodemon build/index.js",
+    "inspector": "npx @modelcontextprotocol/inspector node build/index.js",
+    "postinstall": "node scripts/install.js",
+    "configure": "node scripts/configure.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "server",
+    "gemini",
+    "ai",
+    "llm",
+    "model-context-protocol",
+    "google-ai",
+    "multimodal",
+    "batch-upload",
+    "file-handling",
+    "claude-desktop"
+  ],
+  "author": "mintmcqueen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mintmcqueen/gemini-mcp.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@google/genai": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.17.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "nodemon": "^3.1.9",
+    "typescript": "^5.7.2"
+  }
+}
