@@ -745,6 +745,10 @@ class GeminiMCPServer {
             return await this.handleBatchGetStatus(args);
           case "batch_download_results":
             return await this.handleBatchDownloadResults(args);
+          case "batch_ingest_content":
+            return await this.handleBatchIngestContent(args);
+          case "batch_process":
+            return await this.handleBatchProcess(args);
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -2033,6 +2037,241 @@ class GeminiMCPServer {
           {
             type: "text",
             text: `Error downloading batch results: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_ingest_content tool
+   * Intelligently converts content files to JSONL for batch processing
+   */
+  private async handleBatchIngestContent(args: any) {
+    const inputFile = args?.inputFile;
+    const outputFile = args?.outputFile;
+    const generateScripts = args?.generateScripts !== false; // Default true
+
+    if (!inputFile || typeof inputFile !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "inputFile is required and must be a string path"
+      );
+    }
+
+    try {
+      console.error(`[Batch Ingest] Analyzing content file: ${inputFile}`);
+
+      // Step 1: Analyze content structure
+      const analysis = await this.analyzeContentStructure(inputFile);
+      console.error(`[Batch Ingest] Detected format: ${analysis.format}, complexity: ${analysis.complexity}`);
+
+      // Step 2: Generate output path if not provided
+      const path = await import("path");
+      const finalOutputFile = outputFile || inputFile.replace(path.extname(inputFile), '.jsonl');
+
+      // Step 3: Convert to JSONL
+      console.error(`[Batch Ingest] Converting to JSONL: ${finalOutputFile}`);
+      const report = await this.convertToJSONL(inputFile, analysis.format, finalOutputFile);
+
+      // Step 4: Validate JSONL
+      if (report.validationPassed) {
+        console.error(`[Batch Ingest] Validating JSONL...`);
+        const validation = await this.validateJSONL(finalOutputFile);
+
+        if (!validation.valid) {
+          report.validationPassed = false;
+          report.errors.push(...validation.errors);
+        }
+      }
+
+      console.error(`[Batch Ingest] Ingestion complete: ${report.totalRequests} requests, validation: ${report.validationPassed}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: report.validationPassed
+                ? "Content ingestion successful"
+                : "Content ingestion completed with errors",
+              sourceFile: report.sourceFile,
+              outputFile: report.outputFile,
+              format: report.sourceFormat,
+              requestCount: report.totalRequests,
+              validationPassed: report.validationPassed,
+              errors: report.errors.length > 0 ? report.errors : undefined,
+              analysisScripts: report.analysisScripts,
+              extractionScripts: report.extractionScripts,
+              nextSteps: report.validationPassed
+                ? [
+                    `Upload JSONL file: use upload_file with path "${report.outputFile}"`,
+                    `Create batch job: use batch_create with the returned file URI`,
+                  ]
+                : [
+                    `Review errors and fix source file`,
+                    `Re-run batch_ingest_content after fixes`,
+                  ],
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Ingest] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error ingesting content: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_process tool
+   * Complete end-to-end batch workflow: ingest → upload → create → poll → download
+   */
+  private async handleBatchProcess(args: any) {
+    const inputFile = args?.inputFile;
+    const model = args?.model || MODELS.FLASH_25;
+    const outputLocation = args?.outputLocation || process.cwd();
+    const pollIntervalSeconds = args?.pollIntervalSeconds || 30;
+    const config = args?.config || {};
+
+    if (!inputFile || typeof inputFile !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "inputFile is required and must be a string path"
+      );
+    }
+
+    try {
+      console.error(`[Batch Process] Starting complete workflow for: ${inputFile}`);
+
+      // Step 1: Ingest content (convert to JSONL)
+      console.error(`[Batch Process] Step 1/5: Ingesting content...`);
+      const ingestResult = await this.handleBatchIngestContent({
+        inputFile,
+        generateScripts: true,
+      });
+
+      // Parse the result to get output file path
+      const ingestData = JSON.parse(ingestResult.content[0].text);
+
+      if (!ingestData.validationPassed) {
+        throw new Error(`Content ingestion failed: ${ingestData.errors.join(', ')}`);
+      }
+
+      const jsonlFile = ingestData.outputFile;
+      console.error(`[Batch Process] JSONL created: ${jsonlFile}`);
+
+      // Step 2: Upload JSONL file
+      console.error(`[Batch Process] Step 2/5: Uploading JSONL file...`);
+      const uploadResult = await this.handleUploadFile({
+        filePath: jsonlFile,
+        displayName: `batch-input-${Date.now()}.jsonl`,
+      });
+
+      const uploadData = JSON.parse(uploadResult.content[0].text);
+      const fileUri = uploadData.uri;
+      console.error(`[Batch Process] File uploaded: ${fileUri}`);
+
+      // Step 3: Create batch job
+      console.error(`[Batch Process] Step 3/5: Creating batch job...`);
+      const createResult = await this.handleBatchCreate({
+        model,
+        inputFileUri: fileUri,
+        displayName: `batch-process-${Date.now()}`,
+        outputLocation,
+        config,
+      });
+
+      const createData = JSON.parse(createResult.content[0].text);
+      const batchName = createData.batchName;
+      console.error(`[Batch Process] Batch job created: ${batchName}`);
+
+      // Step 4: Poll until complete
+      console.error(`[Batch Process] Step 4/5: Polling for completion (interval: ${pollIntervalSeconds}s)...`);
+      const statusResult = await this.handleBatchGetStatus({
+        batchName,
+        autoPoll: true,
+        pollIntervalSeconds,
+        maxWaitMs: 86400000, // 24 hours
+      });
+
+      const statusData = JSON.parse(statusResult.content[0].text);
+
+      if (statusData.state !== BatchJobState.JOB_STATE_SUCCEEDED) {
+        throw new Error(`Batch job failed with state: ${statusData.state}. Error: ${JSON.stringify(statusData.error)}`);
+      }
+
+      console.error(`[Batch Process] Batch job completed successfully`);
+
+      // Step 5: Download results
+      console.error(`[Batch Process] Step 5/5: Downloading results...`);
+      const downloadResult = await this.handleBatchDownloadResults({
+        batchName,
+        outputLocation,
+      });
+
+      const downloadData = JSON.parse(downloadResult.content[0].text);
+
+      console.error(`[Batch Process] Complete workflow finished successfully`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Batch process completed successfully",
+              workflow: {
+                step1_ingest: {
+                  sourceFile: ingestData.sourceFile,
+                  jsonlFile: ingestData.outputFile,
+                  requestCount: ingestData.requestCount,
+                },
+                step2_upload: {
+                  fileUri,
+                  state: uploadData.state,
+                },
+                step3_create: {
+                  batchName,
+                  state: createData.state,
+                },
+                step4_poll: {
+                  finalState: statusData.state,
+                  stats: statusData.stats,
+                },
+                step5_download: {
+                  resultCount: downloadData.resultCount,
+                  outputFile: downloadData.outputFile,
+                },
+              },
+              results: downloadData.results,
+              outputFile: downloadData.outputFile,
+              summary: {
+                inputFile,
+                model,
+                totalRequests: ingestData.requestCount,
+                successfulRequests: statusData.stats?.successfulRequestCount,
+                failedRequests: statusData.stats?.failedRequestCount,
+                resultsFile: downloadData.outputFile,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Process] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error in batch process workflow: ${error.message}`,
           },
         ],
         isError: true,
