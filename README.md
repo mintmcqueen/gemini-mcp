@@ -1,10 +1,10 @@
 # Gemini MCP Server
 
-An enhanced MCP (Model Context Protocol) server that provides access to Google's Gemini models with advanced file handling, **Batch API integration**, and automatic API key configuration.
+An MCP Server that provides access to Google's Gemini models with **file uploads** and **Batch API integration**.
 
 ## ✨ Features
 
-- **Multiple Gemini Models**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, and Embedding-001
+- **Multiple Gemini Models on Request**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, and Embedding-001 upon
 - **🆕 Batch API Integration (v0.3.0)**: Async processing at 50% cost with ~24hr turnaround
   - 11 batch tools for content generation and embeddings
   - Intelligent JSONL conversion (CSV, JSON, TXT, MD)
@@ -16,13 +16,6 @@ An enhanced MCP (Model Context Protocol) server that provides access to Google's
 - **Type Safety**: Full TypeScript implementation with proper type definitions
 - **Production Ready**: Retry logic, error handling, and file state monitoring
 
-## ⚠️ Breaking Changes in v0.3.0
-
-- **Renamed Tool**: `batch_upload_files` → `upload_multiple_files`
-- **Reason**: Reserved "batch" prefix for Batch API tools
-- **Migration**: Simple find-and-replace in your code
-- **Impact**: No functional changes, only naming
-
 ## 🚀 Quick Start
 
 ### Option 1: Global Install (Recommended for Claude Code)
@@ -31,23 +24,15 @@ An enhanced MCP (Model Context Protocol) server that provides access to Google's
 # Install globally
 npm install -g @mintmcqueen/gemini-mcp
 
-# Configure .env
-gemini-mcp-configure
-
 # Add to Claude Code
 claude mcp add --transport stdio gemini --scope user --env GEMINI_API_KEY=YOUR_KEY_HERE -- gemini-mcp
 ```
-
-Replace `YOUR_KEY_HERE` with your Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
 ### Option 2: Local Project Install
 
 ```bash
 # Install in your project
 npm install @mintmcqueen/gemini-mcp
-
-# Configure .env
-gemini-mcp-configure
 
 # Add to Claude Code (adjust path as needed)
 claude mcp add --transport stdio gemini --scope project --env GEMINI_API_KEY=YOUR_KEY_HERE -- node node_modules/@mintmcqueen/gemini-mcp/build/index.js
@@ -257,47 +242,6 @@ Information about available Gemini models and their capabilities.
 #### `gemini://conversations/active`
 List of active conversation sessions with metadata.
 
-## 🛠️ Manual Configuration
-
-If you prefer manual setup, see the configuration examples above. The automatic configuration handles all of this for you!
-
-### Claude Code Scopes
-
-- **user** (default): Available across all your projects (`~/.claude.json`)
-- **project**: Shared with team via `.mcp.json` in project root
-- **local**: Private to you in current project (`.claude/settings.local.json`)
-
-The installer uses **user scope** by default for maximum convenience.
-
-## Development
-
-- `npm run build` - Build the project
-- `npm run watch` - Build and watch for changes
-- `npm run dev` - Development mode with auto-restart
-- `npm run inspector` - Run with MCP Inspector for debugging
-
-## File Upload Format
-
-When using the `chat` tool with files, provide them in this format:
-
-```json
-{
-  "message": "Analyze this image",
-  "files": [
-    {
-      "name": "image.jpg",
-      "mimeType": "image/jpeg", 
-      "data": "base64-encoded-file-data"
-    }
-  ]
-}
-```
-
-Supported file types:
-- Images: JPEG, PNG, GIF, WebP
-- Documents: PDF, TXT, MD
-- And more based on Gemini's capabilities
-
 ## 🔧 Development
 
 ```bash
@@ -307,25 +251,6 @@ npm run dev          # Build + auto-restart
 npm run inspector    # Debug with MCP Inspector
 npm run configure    # Reconfigure API key
 ```
-
-## 📚 Documentation
-
-- **README.md**: Quick start and usage guide
-- **ENHANCEMENTS.md**: Technical details about file handling improvements
-
-## 🔧 Troubleshooting
-
-### npx Installation Issues
-
-If you encounter "sh: gemini-mcp: command not found" when using npx:
-
-**Problem**: npx has difficulty executing the bin script directly due to environment setup issues.
-
-**Solutions**:
-1. **Use global install** (recommended): `npm install -g @mintmcqueen/gemini-mcp`
-2. **Use local install**: Install in project and use node directly
-3. **Clear npx cache**: `rm -rf ~/.npm/_npx/*` and try again
-
 ### Connection Failures
 
 If Claude Code fails to connect:
@@ -354,7 +279,5 @@ MIT - see LICENSE file
 
 ## 🙋 Support
 
-- **Issues**: https://github.com/mintmcqueen/gemini-mcp/issues
-- **API Key**: https://aistudio.google.com/app/apikey
 - **MCP Protocol**: https://modelcontextprotocol.io
 - **Gemini API Docs**: https://ai.google.dev/docs
