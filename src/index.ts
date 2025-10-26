@@ -739,6 +739,12 @@ class GeminiMCPServer {
             return await this.handleDeleteFile(args);
           case "cleanup_all_files":
             return await this.handleCleanupAllFiles();
+          case "batch_create":
+            return await this.handleBatchCreate(args);
+          case "batch_get_status":
+            return await this.handleBatchGetStatus(args);
+          case "batch_download_results":
+            return await this.handleBatchDownloadResults(args);
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -1782,6 +1788,251 @@ class GeminiMCPServer {
           {
             type: "text",
             text: `Error during cleanup: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  // ============================================================================
+  // BATCH API TOOL HANDLERS
+  // ============================================================================
+
+  /**
+   * Handler for batch_create tool
+   * Creates a new batch job for content generation
+   */
+  private async handleBatchCreate(args: any) {
+    const model = args?.model || MODELS.FLASH_25;
+    const requests = args?.requests;
+    const inputFileUri = args?.inputFileUri;
+    const displayName = args?.displayName;
+    const outputLocation = args?.outputLocation || process.cwd();
+    const config = args?.config || {};
+
+    // Validate: must have either requests or inputFileUri
+    if (!requests && !inputFileUri) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "Either 'requests' (inline) or 'inputFileUri' (file-based) must be provided"
+      );
+    }
+
+    try {
+      console.error(`[Batch Create] Creating batch job with model: ${model}`);
+      const genAI = await this.getGenAI();
+
+      // Build batch creation params
+      const batchParams: any = {
+        model,
+      };
+
+      if (displayName) {
+        batchParams.displayName = displayName;
+      }
+
+      // Add generation config if provided
+      if (Object.keys(config).length > 0) {
+        batchParams.config = config;
+      }
+
+      // Choose inline or file-based mode
+      if (requests) {
+        // Inline mode
+        console.error(`[Batch Create] Using inline mode with ${requests.length} requests`);
+
+        // Validate requests
+        const validation = await this.validateBatchRequests(requests);
+        if (!validation.valid) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Invalid batch requests: ${validation.errors.join(', ')}`
+          );
+        }
+
+        batchParams.requests = requests;
+      } else {
+        // File-based mode
+        console.error(`[Batch Create] Using file-based mode with file: ${inputFileUri}`);
+        batchParams.src = inputFileUri;
+      }
+
+      // Create the batch job
+      const batchJob = await genAI.batches.create(batchParams);
+
+      console.error(`[Batch Create] Batch job created: ${batchJob.name}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Batch job created successfully",
+              batchName: batchJob.name,
+              displayName: batchJob.displayName,
+              state: batchJob.state,
+              createTime: batchJob.createTime,
+              model,
+              outputLocation,
+              nextSteps: [
+                `Use batch_get_status with batchName: "${batchJob.name}" to monitor progress`,
+                `Use batch_download_results when state is SUCCEEDED`,
+              ],
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Create] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error creating batch job: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_get_status tool
+   * Gets batch job status with optional auto-polling
+   */
+  private async handleBatchGetStatus(args: any) {
+    const batchName = args?.batchName;
+    const autoPoll = args?.autoPoll || false;
+    const pollIntervalSeconds = args?.pollIntervalSeconds || 30;
+    const maxWaitMs = args?.maxWaitMs || 86400000; // 24 hours default
+
+    if (!batchName || typeof batchName !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "batchName is required and must be a string"
+      );
+    }
+
+    try {
+      console.error(`[Batch Status] Getting status for: ${batchName}`);
+      const genAI = await this.getGenAI();
+
+      let batchJob: BatchJob;
+
+      if (autoPoll) {
+        // Use polling helper
+        console.error(`[Batch Status] Auto-polling enabled (interval: ${pollIntervalSeconds}s, max wait: ${maxWaitMs}ms)`);
+        batchJob = await this.pollBatchUntilComplete(batchName, pollIntervalSeconds, maxWaitMs);
+      } else {
+        // Single status check
+        const result = await genAI.batches.get({ name: batchName });
+        batchJob = result as BatchJob;
+      }
+
+      const isTerminal = [
+        BatchJobState.JOB_STATE_SUCCEEDED,
+        BatchJobState.JOB_STATE_FAILED,
+        BatchJobState.JOB_STATE_CANCELLED,
+        BatchJobState.JOB_STATE_EXPIRED,
+      ].includes(batchJob.state as BatchJobState);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              batchName: batchJob.name,
+              displayName: batchJob.displayName,
+              state: batchJob.state,
+              createTime: batchJob.createTime,
+              updateTime: batchJob.updateTime,
+              completionTime: batchJob.completionTime,
+              stats: batchJob.batchStats,
+              isComplete: isTerminal,
+              nextSteps: isTerminal
+                ? batchJob.state === BatchJobState.JOB_STATE_SUCCEEDED
+                  ? [`Use batch_download_results with batchName: "${batchJob.name}" to retrieve results`]
+                  : [`Job ended with state: ${batchJob.state}. Check error field for details.`]
+                : [`Job still processing. Call batch_get_status again or enable autoPoll.`],
+              error: batchJob.error,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Status] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting batch status: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_download_results tool
+   * Downloads and parses results from completed batch job
+   */
+  private async handleBatchDownloadResults(args: any) {
+    const batchName = args?.batchName;
+    const outputLocation = args?.outputLocation || process.cwd();
+
+    if (!batchName || typeof batchName !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "batchName is required and must be a string"
+      );
+    }
+
+    try {
+      console.error(`[Batch Download] Downloading results for: ${batchName}`);
+      const genAI = await this.getGenAI();
+
+      // First, get the batch job to check status
+      const batchJob = await genAI.batches.get({ name: batchName }) as BatchJob;
+
+      if (batchJob.state !== BatchJobState.JOB_STATE_SUCCEEDED) {
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Batch job is not complete. Current state: ${batchJob.state}. Use batch_get_status to monitor progress.`
+        );
+      }
+
+      console.error(`[Batch Download] Batch job succeeded, downloading results...`);
+
+      // Use helper to download and parse
+      const { results, filePath } = await this.downloadAndParseBatchResults(batchJob, outputLocation);
+
+      console.error(`[Batch Download] Results downloaded to: ${filePath}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Batch results downloaded successfully",
+              batchName: batchJob.name,
+              resultCount: results.length,
+              outputFile: filePath,
+              stats: batchJob.batchStats,
+              results: results.slice(0, 5), // Show first 5 results as preview
+              note: results.length > 5 ? `Showing 5 of ${results.length} results. Full results saved to ${filePath}` : undefined,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Download] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error downloading batch results: ${error.message}`,
           },
         ],
         isError: true,
