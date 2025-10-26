@@ -1,0 +1,3 @@
+{"key":"embedding-1","request":{"content":{"parts":[{"text":"Machine learning is a subset of AI"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-2","request":{"content":{"parts":[{"text":"Natural language processing enables computers to understand text"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-3","request":{"content":{"parts":[{"text":"Deep learning uses neural networks"}]},"task_type":"RETRIEVAL_DOCUMENT"}}

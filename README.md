@@ -1,15 +1,27 @@
 # Gemini MCP Server
 
-An enhanced MCP (Model Context Protocol) server that provides access to Google's Gemini 2.5 Pro models with advanced file handling, batch uploads, and automatic API key configuration.
+An enhanced MCP (Model Context Protocol) server that provides access to Google's Gemini models with advanced file handling, **Batch API integration**, and automatic API key configuration.
 
 ## ✨ Features
 
-- **Multiple Gemini Models**: Gemini 2.5 Pro, 2.5 Flash, and 2.0 Flash
+- **Multiple Gemini Models**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, and Embedding-001
+- **🆕 Batch API Integration (v0.3.0)**: Async processing at 50% cost with ~24hr turnaround
+  - 11 batch tools for content generation and embeddings
+  - Intelligent JSONL conversion (CSV, JSON, TXT, MD)
+  - Complete workflow automation
+  - 8 embedding task types with AI recommendations
 - **Advanced File Handling**: Upload and process 40+ files with batch support
 - **Automatic Configuration**: Interactive API key setup for Claude Code & Claude Desktop
 - **Conversation Management**: Multi-turn conversations with history tracking
 - **Type Safety**: Full TypeScript implementation with proper type definitions
 - **Production Ready**: Retry logic, error handling, and file state monitoring
+
+## ⚠️ Breaking Changes in v0.3.0
+
+- **Renamed Tool**: `batch_upload_files` → `upload_multiple_files`
+- **Reason**: Reserved "batch" prefix for Batch API tools
+- **Migration**: Simple find-and-replace in your code
+- **Impact**: No functional changes, only naming
 
 ## 🚀 Quick Start
 
@@ -136,6 +148,106 @@ Clear a conversation session.
 
 Parameters:
 - `id` (required): Conversation ID to clear
+
+### 🆕 Batch API Tools (v0.3.0)
+
+Process large-scale tasks asynchronously at **50% cost** with ~24 hour turnaround.
+
+#### Content Generation
+
+**Simple (Automated):**
+```javascript
+// One-call solution: Ingest → Upload → Create → Poll → Download
+batch_process({
+  inputFile: "prompts.csv",  // CSV, JSON, TXT, or MD
+  model: "gemini-2.5-flash"
+})
+// Returns: Complete results with metadata
+```
+
+**Advanced (Manual Control):**
+```javascript
+// 1. Convert your file to JSONL
+batch_ingest_content({ inputFile: "prompts.csv" })
+// Returns: { outputFile: "prompts.jsonl", requestCount: 100 }
+
+// 2. Upload JSONL
+upload_file({ filePath: "prompts.jsonl" })
+// Returns: { uri: "files/abc123" }
+
+// 3. Create batch job
+batch_create({
+  inputFileUri: "files/abc123",
+  model: "gemini-2.5-flash"
+})
+// Returns: { batchName: "batches/xyz789" }
+
+// 4. Monitor progress
+batch_get_status({
+  batchName: "batches/xyz789",
+  autoPoll: true  // Wait until complete
+})
+// Returns: { state: "SUCCEEDED", stats: {...} }
+
+// 5. Download results
+batch_download_results({ batchName: "batches/xyz789" })
+// Returns: { results: [...], outputFile: "results.json" }
+```
+
+#### Embeddings
+
+**Simple (Automated):**
+```javascript
+// One-call solution with automatic task type prompting
+batch_process_embeddings({
+  inputFile: "documents.txt",
+  // taskType optional - will prompt if not provided
+})
+// Returns: 1536-dimensional embeddings array
+```
+
+**Advanced (Manual Control):**
+```javascript
+// 1. Select task type (if unsure)
+batch_query_task_type({
+  context: "Building a search engine"
+})
+// Returns: { selectedTaskType: "RETRIEVAL_DOCUMENT", recommendation: {...} }
+
+// 2. Ingest content for embeddings
+batch_ingest_embeddings({ inputFile: "documents.txt" })
+// Returns: { outputFile: "documents.embeddings.jsonl" }
+
+// 3-5. Same as content generation workflow
+// 6. Results contain 1536-dimensional vectors
+```
+
+**Task Types (8 options):**
+- `SEMANTIC_SIMILARITY` - Compare text similarity
+- `CLASSIFICATION` - Categorize content
+- `CLUSTERING` - Group similar items
+- `RETRIEVAL_DOCUMENT` - Build search indexes
+- `RETRIEVAL_QUERY` - Search queries
+- `CODE_RETRIEVAL_QUERY` - Code search
+- `QUESTION_ANSWERING` - Q&A systems
+- `FACT_VERIFICATION` - Fact-checking
+
+#### Job Management
+
+```javascript
+// Cancel running job
+batch_cancel({ batchName: "batches/xyz789" })
+
+// Delete completed job
+batch_delete({ batchName: "batches/xyz789" })
+```
+
+**Supported Input Formats:**
+- CSV (converts rows to requests)
+- JSON (wraps objects as requests)
+- TXT (splits lines as requests)
+- MD (markdown sections as requests)
+- JSONL (ready to use)
 
 ### MCP Resources
 

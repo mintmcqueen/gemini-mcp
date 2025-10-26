@@ -1,7 +1,7 @@
 {
   "name": "@mintmcqueen/gemini-mcp",
-  "version": "0.2.11",
-  "description": "Enhanced MCP server for Google Gemini 2.5 Pro with advanced file handling, batch uploads, and conversation management. Supports multimodal interactions and 40+ file processing. Includes automatic API key configuration for Claude Code and Claude Desktop.",
+  "version": "0.3.0",
+  "description": "Enhanced MCP server for Google Gemini with Batch API integration (50% cost, async processing), advanced file handling, and conversation management. Supports 11 batch tools for content generation and embeddings. Includes automatic API key configuration for Claude Code and Claude Desktop.",
   "type": "module",
   "main": "build/index.js",
   "bin": {
@@ -37,6 +37,9 @@
     "model-context-protocol",
     "google-ai",
     "multimodal",
+    "batch-api",
+    "batch-processing",
+    "embeddings",
     "batch-upload",
     "file-handling",
     "claude-desktop"

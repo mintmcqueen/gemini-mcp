@@ -1,0 +1,5 @@
+Artificial intelligence enables machines to learn from data
+Machine learning is a subset of artificial intelligence
+Deep learning uses neural networks with multiple layers
+Natural language processing helps computers understand human language
+Computer vision allows machines to interpret visual information

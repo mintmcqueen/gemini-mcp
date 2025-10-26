@@ -1,0 +1,3 @@
+{"key":"request-1","request":{"contents":[{"parts":[{"text":"{\"text\":\"Hello, Gemini!\"}"}]}]}}
+{"key":"request-2","request":{"contents":[{"parts":[{"text":"{\"text\":\"What is the capital of France?\"}"}]}]}}
+{"key":"request-3","request":{"contents":[{"parts":[{"text":"{\"text\":\"Explain machine learning.\"}"}]}]}}

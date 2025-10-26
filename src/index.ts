@@ -645,7 +645,7 @@ class GeminiMCPServer {
           },
           {
             name: "batch_ingest_embeddings",
-            description: "EMBEDDINGS CONTENT INGESTION - Specialized ingestion for embeddings batch processing. WORKFLOW: 1) Analyzes content structure, 2) Extracts text for embedding, 3) Formats as JSONL with proper embedContent structure, 4) Validates format. OPTIMIZED FOR: Text extraction from various formats (CSV columns, JSON fields, TXT lines, MD sections). RETURNS: JSONL file ready for batch_create_embeddings.",
+            description: "EMBEDDINGS CONTENT INGESTION - Specialized ingestion for embeddings batch processing. WORKFLOW: 1) Analyzes content structure, 2) Extracts text for embedding, 3) Formats as JSONL with proper embedContent structure including task_type, 4) Validates format. OPTIMIZED FOR: Text extraction from various formats (CSV columns, JSON fields, TXT lines, MD sections). RETURNS: JSONL file ready for batch_create_embeddings with task_type embedded in each request.",
             inputSchema: {
               type: "object",
               properties: {
@@ -661,8 +661,12 @@ class GeminiMCPServer {
                   type: "string",
                   description: "For CSV/JSON: field name containing text to embed (auto-detected if not provided)",
                 },
+                taskType: {
+                  type: "string",
+                  description: "Embedding task type (RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY, CLASSIFICATION, CLUSTERING, RETRIEVAL_QUERY, CODE_RETRIEVAL_QUERY, QUESTION_ANSWERING, FACT_VERIFICATION). Use batch_query_task_type if unsure.",
+                },
               },
-              required: ["inputFile"],
+              required: ["inputFile", "taskType"],
             },
           },
           {
@@ -1110,8 +1114,9 @@ class GeminiMCPServer {
     lines.forEach((line, index) => {
       try {
         const parsed = JSON.parse(line);
-        if (!parsed.request || !parsed.request.contents) {
-          errors.push(`Line ${index + 1}: missing required 'request.contents' field`);
+        // Accept both content batch format (contents) and embeddings format (content)
+        if (!parsed.request || (!parsed.request.contents && !parsed.request.content)) {
+          errors.push(`Line ${index + 1}: missing required 'request.contents' or 'request.content' field`);
         }
       } catch (e) {
         errors.push(`Line ${index + 1}: invalid JSON`);
@@ -1871,7 +1876,11 @@ class GeminiMCPServer {
       } else {
         // File-based mode
         console.error(`[Batch Create] Using file-based mode with file: ${inputFileUri}`);
-        batchParams.src = inputFileUri;
+        // Extract file name from URI (handle both full URIs and short names)
+        const fileName = inputFileUri.includes('://')
+          ? inputFileUri.split('/').slice(-2).join('/')  // Extract "files/xxx" from full URI
+          : inputFileUri;  // Already in correct format
+        batchParams.src = fileName;
       }
 
       // Create the batch job
@@ -2189,7 +2198,7 @@ class GeminiMCPServer {
       });
 
       const uploadData = JSON.parse(uploadResult.content[0].text);
-      const fileUri = uploadData.uri;
+      const fileUri = uploadData.fileUri;
       console.error(`[Batch Process] File uploaded: ${fileUri}`);
 
       // Step 3: Create batch job
@@ -2324,9 +2333,6 @@ class GeminiMCPServer {
       // Build batch creation params for embeddings
       const batchParams: any = {
         model,
-        config: {
-          taskType,
-        },
       };
 
       if (displayName) {
@@ -2336,14 +2342,18 @@ class GeminiMCPServer {
       // Choose inline or file-based mode
       if (requests) {
         console.error(`[Batch Embeddings] Using inline mode with ${requests.length} requests`);
-        batchParams.requests = requests;
+        batchParams.src = { inlinedRequests: requests };
       } else {
         console.error(`[Batch Embeddings] Using file-based mode with file: ${inputFileUri}`);
-        batchParams.src = inputFileUri;
+        // Extract file name from URI (handle both full URIs and short names)
+        const fileName = inputFileUri.includes('://')
+          ? inputFileUri.split('/').slice(-2).join('/')  // Extract "files/xxx" from full URI
+          : inputFileUri;  // Already in correct format
+        batchParams.src = { fileName: fileName };
       }
 
-      // Create the batch job
-      const batchJob = await genAI.batches.create(batchParams);
+      // Create the batch job using createEmbeddings method
+      const batchJob = await genAI.batches.createEmbeddings(batchParams);
 
       console.error(`[Batch Embeddings] Batch job created: ${batchJob.name}`);
 
@@ -2537,11 +2547,19 @@ class GeminiMCPServer {
     const inputFile = args?.inputFile;
     const outputFile = args?.outputFile;
     const textField = args?.textField;
+    const taskType = args?.taskType;
 
     if (!inputFile || typeof inputFile !== "string") {
       throw new McpError(
         ErrorCode.InvalidParams,
         "inputFile is required and must be a string path"
+      );
+    }
+
+    if (!taskType || typeof taskType !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "taskType is required and must be a string (e.g., 'RETRIEVAL_DOCUMENT', 'SEMANTIC_SIMILARITY')"
       );
     }
 
@@ -2573,6 +2591,7 @@ class GeminiMCPServer {
                 key: `embedding-${i + 1}`,
                 request: {
                   content: { parts: [{ text }] },
+                  task_type: taskType,
                 },
               }));
             });
@@ -2590,6 +2609,7 @@ class GeminiMCPServer {
                 key: `embedding-${i + 1}`,
                 request: {
                   content: { parts: [{ text }] },
+                  task_type: taskType,
                 },
               }));
             });
@@ -2603,6 +2623,7 @@ class GeminiMCPServer {
                 key: `embedding-${i + 1}`,
                 request: {
                   content: { parts: [{ text: line }] },
+                  task_type: taskType,
                 },
               }));
             });

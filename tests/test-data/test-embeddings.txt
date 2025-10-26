@@ -1,0 +1,3 @@
+Machine learning is a subset of AI
+Natural language processing enables computers to understand text
+Deep learning uses neural networks

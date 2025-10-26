@@ -1,0 +1,5 @@
+{"key":"embedding-1","request":{"content":{"parts":[{"text":"Artificial intelligence enables machines to learn from data"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-2","request":{"content":{"parts":[{"text":"Machine learning is a subset of artificial intelligence"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-3","request":{"content":{"parts":[{"text":"Deep learning uses neural networks with multiple layers"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-4","request":{"content":{"parts":[{"text":"Natural language processing helps computers understand human language"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
+{"key":"embedding-5","request":{"content":{"parts":[{"text":"Computer vision allows machines to interpret visual information"}]},"task_type":"RETRIEVAL_DOCUMENT"}}
