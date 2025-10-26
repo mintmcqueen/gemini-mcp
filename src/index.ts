@@ -36,7 +36,7 @@ const BATCH_CONFIG = {
   MAX_PROCESSING_WAIT_MS: 120000, // 2 minutes max wait (rarely needed)
 };
 
-interface BatchUploadResult {
+interface MultipleUploadResult {
   successful: Array<{
     originalPath: string;
     file: any; // File object from Gemini
@@ -246,7 +246,7 @@ class GeminiMCPServer {
         tools: [
           {
             name: "chat",
-            description: "SEND MESSAGE TO GEMINI (with optional files) - Chat with Gemini, optionally including uploaded files for multimodal analysis. TYPICAL USE: 0-2 files for most tasks (code review, document analysis, image description). SCALES TO: 40+ files when needed for comprehensive analysis. WORKFLOW: 1) Upload files first using upload_file (single) or batch_upload_files (multiple), 2) Pass returned URIs in fileUris array, 3) Include your text prompt in message. The server handles file object caching and proper API formatting. Supports conversation continuity via conversationId. RETURNS: response text, token usage, conversation ID. Files are passed as direct objects to Gemini (not fileData structures). Auto-retrieves missing files from API if not cached.",
+            description: "SEND MESSAGE TO GEMINI (with optional files) - Chat with Gemini, optionally including uploaded files for multimodal analysis. TYPICAL USE: 0-2 files for most tasks (code review, document analysis, image description). SCALES TO: 40+ files when needed for comprehensive analysis. WORKFLOW: 1) Upload files first using upload_file (single) or upload_multiple_files (multiple), 2) Pass returned URIs in fileUris array, 3) Include your text prompt in message. The server handles file object caching and proper API formatting. Supports conversation continuity via conversationId. RETURNS: response text, token usage, conversation ID. Files are passed as direct objects to Gemini (not fileData structures). Auto-retrieves missing files from API if not cached.",
             inputSchema: {
               type: "object",
               properties: {
@@ -288,7 +288,7 @@ class GeminiMCPServer {
             },
           },
           {
-            name: "batch_upload_files",
+            name: "upload_multiple_files",
             description: "UPLOAD MULTIPLE FILES EFFICIENTLY - Handles 2-40+ files with smart parallel processing. TYPICAL USE: 2-10 files for multi-document analysis, code reviews, or comparative tasks. SCALES TO: 40+ files for comprehensive dataset processing. FEATURES: Automatic retry (3 attempts), parallel uploads (5 concurrent default), processing state monitoring (waits for ACTIVE state). WORKFLOW: 1) Provide array of file paths, 2) System uploads in optimized batches, 3) Returns URIs for use in chat tool. PERFORMANCE: 2 files = ~30 seconds, 10 files = ~1-2 minutes, 40 files = ~2-3 minutes. Each successful upload returns: originalPath, file object, URI. Failed uploads include error details. Use upload_file for single files instead.",
             inputSchema: {
               type: "object",
@@ -343,7 +343,7 @@ class GeminiMCPServer {
           },
           {
             name: "upload_file",
-            description: "UPLOAD SINGLE FILE - Standard method for uploading one file to Gemini. BEST FOR: Single documents, images, or code files for immediate analysis. Includes automatic retry and state monitoring until file is ready. WORKFLOW: 1) Upload with auto-detected MIME type, 2) Wait for processing to complete (usually 10-30 seconds), 3) Returns URI for chat tool. RETURNS: fileUri (pass to chat tool), displayName, mimeType, sizeBytes, state. Files auto-delete after 48 hours. For 2+ files, consider batch_upload_files for efficiency.",
+            description: "UPLOAD SINGLE FILE - Standard method for uploading one file to Gemini. BEST FOR: Single documents, images, or code files for immediate analysis. Includes automatic retry and state monitoring until file is ready. WORKFLOW: 1) Upload with auto-detected MIME type, 2) Wait for processing to complete (usually 10-30 seconds), 3) Returns URI for chat tool. RETURNS: fileUri (pass to chat tool), displayName, mimeType, sizeBytes, state. Files auto-delete after 48 hours. For 2+ files, consider upload_multiple_files for efficiency.",
             inputSchema: {
               type: "object",
               properties: {
@@ -425,8 +425,8 @@ class GeminiMCPServer {
         switch (name) {
           case "chat":
             return await this.handleChat(args);
-          case "batch_upload_files":
-            return await this.handleBatchUpload(args);
+          case "upload_multiple_files":
+            return await this.handleMultipleUpload(args);
           case "start_conversation":
             return await this.handleStartConversation(args);
           case "clear_conversation":
@@ -526,7 +526,7 @@ class GeminiMCPServer {
     return processedFile;
   }
 
-  private async handleBatchUpload(args: any) {
+  private async handleMultipleUpload(args: any) {
     const filePaths = args?.filePaths || [];
     const maxConcurrent = Math.min(args?.maxConcurrent || 5, 10);
     const waitForProcessing = args?.waitForProcessing !== false;
@@ -538,9 +538,9 @@ class GeminiMCPServer {
       );
     }
 
-    console.error(`[Batch Upload] Starting upload of ${filePaths.length} files with ${maxConcurrent} concurrent uploads`);
+    console.error(`[Multiple Upload] Starting upload of ${filePaths.length} files with ${maxConcurrent} concurrent uploads`);
 
-    const result: BatchUploadResult = {
+    const result: MultipleUploadResult = {
       successful: [],
       failed: [],
     };
@@ -548,8 +548,8 @@ class GeminiMCPServer {
     // Process files in batches
     for (let i = 0; i < filePaths.length; i += maxConcurrent) {
       const batch = filePaths.slice(i, i + maxConcurrent);
-      console.error(`[Batch Upload] Processing batch ${Math.floor(i / maxConcurrent) + 1}/${Math.ceil(filePaths.length / maxConcurrent)}`);
-      
+      console.error(`[Multiple Upload] Processing batch ${Math.floor(i / maxConcurrent) + 1}/${Math.ceil(filePaths.length / maxConcurrent)}`);
+
       const uploadPromises = batch.map(async (filePath) => {
         try {
           // Check if file exists
@@ -558,13 +558,13 @@ class GeminiMCPServer {
 
           // Upload with retry
           const uploadedFile = await this.uploadFileWithRetry(filePath);
-          
+
           // Wait for processing if requested
           let finalFile = uploadedFile;
           if (waitForProcessing) {
             finalFile = await this.waitForFileProcessing(uploadedFile);
           }
-          
+
           // Store file info in our cache
           const fileInfo: UploadedFile = {
             name: finalFile.name || "",
@@ -578,28 +578,28 @@ class GeminiMCPServer {
             uri: finalFile.uri || finalFile.name || "",
             state: finalFile.state || "ACTIVE",
           };
-          
+
           this.uploadedFiles.set(fileInfo.uri, fileInfo);
           this.fileObjects.set(fileInfo.uri, finalFile); // Store the actual file object
-          
+
           result.successful.push({
             originalPath: filePath,
             file: finalFile,
             uri: fileInfo.uri,
           });
-          
+
         } catch (error: any) {
-          console.error(`[Batch Upload] Failed to upload ${filePath}: ${error.message}`);
+          console.error(`[Multiple Upload] Failed to upload ${filePath}: ${error.message}`);
           result.failed.push({
             originalPath: filePath,
             error: error.message,
           });
         }
       });
-      
+
       // Wait for current batch to complete
       await Promise.all(uploadPromises);
-      
+
       // Small delay between batches to avoid rate limiting
       if (i + maxConcurrent < filePaths.length) {
         await this.sleep(1000);
@@ -616,10 +616,10 @@ class GeminiMCPServer {
         state: s.file.state,
       })),
       failed: result.failed,
-      message: `Batch upload completed: ${result.successful.length}/${filePaths.length} files uploaded successfully`,
+      message: `Multiple file upload completed: ${result.successful.length}/${filePaths.length} files uploaded successfully`,
     };
 
-    console.error(`[Batch Upload] Complete: ${summary.message}`);
+    console.error(`[Multiple Upload] Complete: ${summary.message}`);
 
     return {
       content: [
