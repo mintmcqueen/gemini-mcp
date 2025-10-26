@@ -18,6 +18,10 @@ import {
   ConversationSession,
   FileUpload,
   UploadedFile,
+  BatchJob,
+  BatchJobState,
+  EmbeddingTaskType,
+  ContentIngestionReport,
 } from "./types/gemini.js";
 import { createPartFromUri } from "@google/genai";
 
@@ -25,6 +29,7 @@ const MODELS = {
   PRO: "gemini-2.5-pro",
   FLASH_25: "gemini-2.5-flash",
   FLASH_20: "gemini-2.0-flash-exp",
+  EMBEDDING: "gemini-embedding-001",
 } as const;
 
 // Upload configuration - balanced for typical 1-10 file use cases
@@ -413,6 +418,299 @@ class GeminiMCPServer {
               properties: {},
             },
           },
+          {
+            name: "batch_create",
+            description: "CREATE BATCH JOB - Create async content generation batch job with Gemini. COST: 50% cheaper than standard API. TURNAROUND: ~24 hours target. WORKFLOW: 1) Prepare JSONL file with requests (or use batch_ingest_content first), 2) Upload file with upload_file, 3) Call batch_create with file URI, 4) Use batch_get_status to monitor progress, 5) Use batch_download_results when complete. SUPPORTS: Inline requests (<20MB) or file-based (JSONL for large batches). Returns batch job ID and initial status.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                model: {
+                  type: "string",
+                  enum: [MODELS.PRO, MODELS.FLASH_25, MODELS.FLASH_20],
+                  description: "Gemini model for content generation",
+                  default: MODELS.FLASH_25,
+                },
+                requests: {
+                  type: "array",
+                  description: "Inline batch requests (for small batches <20MB). Each request should have 'key' and 'request' fields.",
+                },
+                inputFileUri: {
+                  type: "string",
+                  description: "URI of uploaded JSONL file (from upload_file tool). Use for large batches or when requests exceed 20MB.",
+                },
+                displayName: {
+                  type: "string",
+                  description: "Optional display name for the batch job",
+                },
+                outputLocation: {
+                  type: "string",
+                  description: "Output directory for results (defaults to current working directory)",
+                },
+                config: {
+                  type: "object",
+                  description: "Optional generation config (temperature, maxOutputTokens, etc.)",
+                  properties: {
+                    temperature: {
+                      type: "number",
+                      minimum: 0,
+                      maximum: 2,
+                      default: 1.0,
+                    },
+                    maxOutputTokens: {
+                      type: "number",
+                      minimum: 1,
+                      maximum: 500000,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          {
+            name: "batch_process",
+            description: "COMPLETE BATCH WORKFLOW - End-to-end content generation batch processing. WORKFLOW: 1) Ingests content file (CSV, JSON, TXT, etc.), 2) Converts to JSONL, 3) Uploads to Gemini, 4) Creates batch job, 5) Polls until complete, 6) Downloads and parses results. BEST FOR: Users who want simple one-call solution. RETURNS: Final results with metadata. For more control, use individual tools (batch_ingest_content, batch_create, batch_get_status, batch_download_results).",
+            inputSchema: {
+              type: "object",
+              properties: {
+                inputFile: {
+                  type: "string",
+                  description: "Path to content file (CSV, JSON, TXT, MD, JSONL)",
+                },
+                model: {
+                  type: "string",
+                  enum: [MODELS.PRO, MODELS.FLASH_25, MODELS.FLASH_20],
+                  description: "Gemini model for content generation",
+                  default: MODELS.FLASH_25,
+                },
+                outputLocation: {
+                  type: "string",
+                  description: "Output directory for results (defaults to current working directory)",
+                },
+                pollIntervalSeconds: {
+                  type: "number",
+                  description: "Seconds between status checks (default: 30)",
+                  default: 30,
+                  minimum: 10,
+                },
+                config: {
+                  type: "object",
+                  description: "Optional generation config",
+                },
+              },
+              required: ["inputFile"],
+            },
+          },
+          {
+            name: "batch_ingest_content",
+            description: "INTELLIGENT CONTENT INGESTION - Analyzes content file, converts to JSONL for batch processing. WORKFLOW: 1) Detects format (CSV, JSON, TXT, MD), 2) Analyzes structure/complexity, 3) Writes analysis scripts if needed, 4) Converts to proper JSONL format, 5) Validates JSONL structure. SUPPORTS: CSV (converts rows), JSON (wraps objects), TXT/MD (splits by lines/sections). RETURNS: Conversion report with outputFile path, validation status, and any generated scripts.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                inputFile: {
+                  type: "string",
+                  description: "Path to content file to ingest",
+                },
+                outputFile: {
+                  type: "string",
+                  description: "Optional output JSONL path (auto-generated if not provided)",
+                },
+                generateScripts: {
+                  type: "boolean",
+                  description: "Generate analysis/extraction scripts for complex content",
+                  default: true,
+                },
+              },
+              required: ["inputFile"],
+            },
+          },
+          {
+            name: "batch_get_status",
+            description: "GET BATCH JOB STATUS - Check status of running batch job with optional auto-polling. STATES: PENDING (queued), RUNNING (processing), SUCCEEDED (complete), FAILED (error), CANCELLED (user stopped), EXPIRED (timeout). WORKFLOW: 1) Call with batch job name/ID, 2) Optionally enable polling to wait for completion, 3) Returns current state, progress stats, and completion info. USAGE: Pass job name from batch_create response. Enable autoPoll for hands-off waiting.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                batchName: {
+                  type: "string",
+                  description: "Batch job name/ID from batch_create",
+                },
+                autoPoll: {
+                  type: "boolean",
+                  description: "Automatically poll until job completes (SUCCEEDED, FAILED, or CANCELLED)",
+                  default: false,
+                },
+                pollIntervalSeconds: {
+                  type: "number",
+                  description: "Seconds between status checks when autoPoll=true (default: 30)",
+                  default: 30,
+                  minimum: 10,
+                },
+                maxWaitMs: {
+                  type: "number",
+                  description: "Maximum wait time in milliseconds (default: 24 hours)",
+                  default: 86400000,
+                },
+              },
+              required: ["batchName"],
+            },
+          },
+          {
+            name: "batch_download_results",
+            description: "DOWNLOAD BATCH RESULTS - Download and parse results from completed batch job. WORKFLOW: 1) Checks job status (must be SUCCEEDED), 2) Downloads result file from Gemini API, 3) Parses JSONL results, 4) Saves to local file, 5) Returns parsed results array. RETURNS: Array of results with original keys, responses, and metadata. Also saves to file in outputLocation.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                batchName: {
+                  type: "string",
+                  description: "Batch job name/ID from batch_create",
+                },
+                outputLocation: {
+                  type: "string",
+                  description: "Directory to save results file (defaults to current working directory)",
+                },
+              },
+              required: ["batchName"],
+            },
+          },
+          {
+            name: "batch_create_embeddings",
+            description: "CREATE EMBEDDINGS BATCH JOB - Create async embeddings generation batch job. COST: 50% cheaper than standard API. MODEL: gemini-embedding-001 (1536 dimensions). WORKFLOW: 1) Prepare content (use batch_ingest_embeddings for conversion), 2) Select task type (use batch_query_task_type if unsure), 3) Upload file, 4) Call batch_create_embeddings, 5) Monitor with batch_get_status, 6) Download with batch_download_results. TASK TYPES: See batch_query_task_type for descriptions and recommendations.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                model: {
+                  type: "string",
+                  description: "Embedding model",
+                  default: MODELS.EMBEDDING,
+                  enum: [MODELS.EMBEDDING],
+                },
+                requests: {
+                  type: "array",
+                  description: "Inline embedding requests (for small batches)",
+                },
+                inputFileUri: {
+                  type: "string",
+                  description: "URI of uploaded JSONL file with embedding requests",
+                },
+                taskType: {
+                  type: "string",
+                  enum: Object.values(EmbeddingTaskType),
+                  description: "Embedding task type (affects model optimization). Use batch_query_task_type for guidance.",
+                },
+                displayName: {
+                  type: "string",
+                  description: "Optional display name for the batch job",
+                },
+                outputLocation: {
+                  type: "string",
+                  description: "Output directory for results",
+                },
+              },
+              required: ["taskType"],
+            },
+          },
+          {
+            name: "batch_process_embeddings",
+            description: "COMPLETE EMBEDDINGS WORKFLOW - End-to-end embeddings batch processing. WORKFLOW: 1) Ingests content, 2) Queries user for task type (or auto-recommends), 3) Converts to JSONL, 4) Uploads, 5) Creates batch job, 6) Polls until complete, 7) Downloads results. BEST FOR: Simple one-call embeddings generation. RETURNS: Embeddings array (1536-dimensional vectors) with metadata.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                inputFile: {
+                  type: "string",
+                  description: "Path to content file",
+                },
+                taskType: {
+                  type: "string",
+                  enum: Object.values(EmbeddingTaskType),
+                  description: "Embedding task type (omit to get interactive prompt)",
+                },
+                model: {
+                  type: "string",
+                  description: "Embedding model",
+                  default: MODELS.EMBEDDING,
+                  enum: [MODELS.EMBEDDING],
+                },
+                outputLocation: {
+                  type: "string",
+                  description: "Output directory for results",
+                },
+                pollIntervalSeconds: {
+                  type: "number",
+                  description: "Seconds between status checks",
+                  default: 30,
+                  minimum: 10,
+                },
+              },
+              required: ["inputFile"],
+            },
+          },
+          {
+            name: "batch_ingest_embeddings",
+            description: "EMBEDDINGS CONTENT INGESTION - Specialized ingestion for embeddings batch processing. WORKFLOW: 1) Analyzes content structure, 2) Extracts text for embedding, 3) Formats as JSONL with proper embedContent structure, 4) Validates format. OPTIMIZED FOR: Text extraction from various formats (CSV columns, JSON fields, TXT lines, MD sections). RETURNS: JSONL file ready for batch_create_embeddings.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                inputFile: {
+                  type: "string",
+                  description: "Path to content file",
+                },
+                outputFile: {
+                  type: "string",
+                  description: "Optional output JSONL path",
+                },
+                textField: {
+                  type: "string",
+                  description: "For CSV/JSON: field name containing text to embed (auto-detected if not provided)",
+                },
+              },
+              required: ["inputFile"],
+            },
+          },
+          {
+            name: "batch_query_task_type",
+            description: "INTERACTIVE TASK TYPE SELECTOR - Helps choose optimal embedding task type with recommendations. WORKFLOW: 1) Optionally analyzes sample content, 2) Shows all 8 task types with descriptions, 3) Provides AI recommendation based on context, 4) Returns selected task type. TASK TYPES: SEMANTIC_SIMILARITY (compare text similarity), CLASSIFICATION (categorize text), CLUSTERING (group similar items), RETRIEVAL_DOCUMENT (index for search), RETRIEVAL_QUERY (search queries), CODE_RETRIEVAL_QUERY (code search), QUESTION_ANSWERING (Q&A systems), FACT_VERIFICATION (check claims).",
+            inputSchema: {
+              type: "object",
+              properties: {
+                context: {
+                  type: "string",
+                  description: "Optional context about your use case (e.g., 'building search engine for documentation')",
+                },
+                sampleContent: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Optional sample texts to analyze for recommendation",
+                },
+              },
+            },
+          },
+          {
+            name: "batch_cancel",
+            description: "CANCEL BATCH JOB - Request cancellation of running batch job. WORKFLOW: 1) Sends cancel request to Gemini API, 2) Job transitions to CANCELLED state, 3) Processing stops (may take a few seconds), 4) Partial results may be available. USE CASE: Stop long-running job due to errors, changed requirements, or cost management. NOTE: Cannot cancel SUCCEEDED or FAILED jobs.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                batchName: {
+                  type: "string",
+                  description: "Batch job name/ID to cancel",
+                },
+              },
+              required: ["batchName"],
+            },
+          },
+          {
+            name: "batch_delete",
+            description: "DELETE BATCH JOB - Permanently delete batch job and associated data. WORKFLOW: 1) Validates job exists, 2) Deletes job metadata from Gemini API, 3) Removes from internal tracking. USE CASE: Clean up completed/failed jobs, manage job history, free storage. WARNING: Irreversible operation. Results will be lost if not downloaded first. Recommended to download results before deletion.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                batchName: {
+                  type: "string",
+                  description: "Batch job name/ID to delete",
+                },
+              },
+              required: ["batchName"],
+            },
+          },
         ],
       })
     );
@@ -524,6 +822,367 @@ class GeminiMCPServer {
     
     console.error(`[Processing] File ${file.name} is now ${processedFile.state}`);
     return processedFile;
+  }
+
+  // ============================================================================
+  // BATCH API HELPER FUNCTIONS
+  // ============================================================================
+
+  /**
+   * Poll batch job status until completion or timeout
+   */
+  private async pollBatchUntilComplete(
+    batchName: string,
+    intervalSeconds: number = 30,
+    maxWaitMs: number = 86400000 // 24 hours
+  ): Promise<BatchJob> {
+    const startTime = Date.now();
+    const completedStates = new Set([
+      BatchJobState.JOB_STATE_SUCCEEDED,
+      BatchJobState.JOB_STATE_FAILED,
+      BatchJobState.JOB_STATE_CANCELLED,
+      BatchJobState.JOB_STATE_EXPIRED,
+    ]);
+
+    console.error(`[Batch] Polling status for job: ${batchName}`);
+
+    while (true) {
+      const genAI = await this.getGenAI();
+      const batchJob = await genAI.batches.get({ name: batchName });
+
+      console.error(`[Batch] Current state: ${batchJob.state}`);
+
+      if (completedStates.has(batchJob.state as BatchJobState)) {
+        console.error(`[Batch] Job finished with state: ${batchJob.state}`);
+        return batchJob;
+      }
+
+      if (Date.now() - startTime > maxWaitMs) {
+        throw new Error(`Batch job polling timeout after ${maxWaitMs}ms`);
+      }
+
+      await this.sleep(intervalSeconds * 1000);
+    }
+  }
+
+  /**
+   * Download and parse batch results from completed job
+   */
+  private async downloadAndParseBatchResults(
+    batchJob: BatchJob,
+    outputLocation: string = process.cwd()
+  ): Promise<{ results: any[]; filePath: string }> {
+    // Handle inline responses
+    if (batchJob.dest?.inlinedResponses) {
+      const results = batchJob.dest.inlinedResponses.map((resp: any) => {
+        if (resp.response) {
+          return resp.response.text || resp.response;
+        } else if (resp.error) {
+          return { error: resp.error };
+        }
+        return resp;
+      });
+
+      const fs = await import("fs/promises");
+      const filePath = path.join(outputLocation, `batch_results_${Date.now()}.json`);
+      await fs.writeFile(filePath, JSON.stringify(results, null, 2));
+
+      return { results, filePath };
+    }
+
+    // Handle file-based results
+    if (batchJob.dest?.fileName) {
+      const genAI = await this.getGenAI();
+      const fileContent = await genAI.files.download({ file: batchJob.dest.fileName });
+
+      // Parse JSONL content
+      const results = fileContent
+        .toString('utf-8')
+        .split('\n')
+        .filter((line: string) => line.trim())
+        .map((line: string) => JSON.parse(line));
+
+      const fs = await import("fs/promises");
+      const filePath = path.join(outputLocation, `batch_results_${Date.now()}.jsonl`);
+      await fs.writeFile(filePath, fileContent);
+
+      return { results, filePath };
+    }
+
+    throw new Error("No results found in batch job");
+  }
+
+  /**
+   * Validate batch requests format
+   */
+  private async validateBatchRequests(requests: any[]): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+
+    if (!Array.isArray(requests)) {
+      errors.push("Requests must be an array");
+      return { valid: false, errors };
+    }
+
+    if (requests.length === 0) {
+      errors.push("Requests array cannot be empty");
+      return { valid: false, errors };
+    }
+
+    requests.forEach((req, index) => {
+      if (!req.contents && !req.request?.contents) {
+        errors.push(`Request ${index}: missing 'contents' field`);
+      }
+    });
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Analyze content structure of input file
+   */
+  private async analyzeContentStructure(filePath: string): Promise<{
+    format: string;
+    structure: any;
+    complexity: string;
+  }> {
+    const fs = await import("fs/promises");
+    const ext = path.extname(filePath).toLowerCase();
+    const content = await fs.readFile(filePath, 'utf-8');
+
+    // Detect format
+    let format = "unknown";
+    let structure: any = {};
+    let complexity = "simple";
+
+    if (ext === ".jsonl" || ext === ".ndjson") {
+      format = "jsonl";
+      const lines = content.split('\n').filter(l => l.trim());
+      structure = { lineCount: lines.length };
+    } else if (ext === ".json") {
+      format = "json";
+      try {
+        const parsed = JSON.parse(content);
+        structure = { isArray: Array.isArray(parsed), keys: Object.keys(parsed) };
+      } catch (e) {
+        complexity = "complex";
+      }
+    } else if (ext === ".csv") {
+      format = "csv";
+      const lines = content.split('\n');
+      structure = { rowCount: lines.length, hasHeader: true };
+    } else if (ext === ".txt" || ext === ".md") {
+      format = "text";
+      const lines = content.split('\n');
+      structure = { lineCount: lines.length };
+    } else if (ext === ".xml") {
+      format = "xml";
+      complexity = "complex";
+    }
+
+    return { format, structure, complexity };
+  }
+
+  /**
+   * Convert various file formats to JSONL for batch processing
+   */
+  private async convertToJSONL(
+    filePath: string,
+    format: string,
+    outputPath: string
+  ): Promise<ContentIngestionReport> {
+    const fs = await import("fs/promises");
+    const content = await fs.readFile(filePath, 'utf-8');
+    const errors: string[] = [];
+    let totalRequests = 0;
+
+    let jsonlLines: string[] = [];
+
+    try {
+      switch (format) {
+        case "jsonl":
+          // Already JSONL, just copy
+          jsonlLines = content.split('\n').filter(l => l.trim());
+          break;
+
+        case "json":
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) {
+            jsonlLines = parsed.map((item, i) =>
+              JSON.stringify({
+                key: `request-${i + 1}`,
+                request: { contents: [{ parts: [{ text: typeof item === 'string' ? item : JSON.stringify(item) }] }] }
+              })
+            );
+          } else {
+            // Single object
+            jsonlLines = [JSON.stringify({
+              key: "request-1",
+              request: { contents: [{ parts: [{ text: JSON.stringify(parsed) }] }] }
+            })];
+          }
+          break;
+
+        case "csv":
+          const lines = content.split('\n').filter(l => l.trim());
+          const header = lines[0];
+          jsonlLines = lines.slice(1).map((line, i) =>
+            JSON.stringify({
+              key: `request-${i + 1}`,
+              request: { contents: [{ parts: [{ text: line }] }] }
+            })
+          );
+          break;
+
+        case "text":
+          const textLines = content.split('\n').filter(l => l.trim());
+          jsonlLines = textLines.map((line, i) =>
+            JSON.stringify({
+              key: `request-${i + 1}`,
+              request: { contents: [{ parts: [{ text: line }] }] }
+            })
+          );
+          break;
+
+        default:
+          errors.push(`Unsupported format: ${format}`);
+          return {
+            sourceFile: filePath,
+            outputFile: outputPath,
+            sourceFormat: format,
+            totalRequests: 0,
+            validationPassed: false,
+            errors,
+          };
+      }
+
+      totalRequests = jsonlLines.length;
+      await fs.writeFile(outputPath, jsonlLines.join('\n'));
+
+    } catch (error: any) {
+      errors.push(`Conversion error: ${error.message}`);
+    }
+
+    return {
+      sourceFile: filePath,
+      outputFile: outputPath,
+      sourceFormat: format,
+      totalRequests,
+      validationPassed: errors.length === 0,
+      errors,
+    };
+  }
+
+  /**
+   * Validate JSONL format for batch API
+   */
+  private async validateJSONL(filePath: string): Promise<{
+    valid: boolean;
+    errors: string[];
+    requestCount: number;
+  }> {
+    const fs = await import("fs/promises");
+    const content = await fs.readFile(filePath, 'utf-8');
+    const errors: string[] = [];
+    const lines = content.split('\n').filter(l => l.trim());
+
+    lines.forEach((line, index) => {
+      try {
+        const parsed = JSON.parse(line);
+        if (!parsed.request || !parsed.request.contents) {
+          errors.push(`Line ${index + 1}: missing required 'request.contents' field`);
+        }
+      } catch (e) {
+        errors.push(`Line ${index + 1}: invalid JSON`);
+      }
+    });
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      requestCount: lines.length,
+    };
+  }
+
+  /**
+   * Prompt user to select embedding task type
+   */
+  private async promptForTaskType(
+    context?: string,
+    samples?: string[]
+  ): Promise<EmbeddingTaskType> {
+    // This would ideally use an interactive prompt library
+    // For now, return a sensible default and log guidance
+    console.error("\n[Batch Embeddings] Task Type Selection Required");
+    console.error("Available task types:");
+    console.error("  1. SEMANTIC_SIMILARITY - Find similar content");
+    console.error("  2. CLASSIFICATION - Categorize into predefined labels");
+    console.error("  3. CLUSTERING - Group by similarity (no labels)");
+    console.error("  4. RETRIEVAL_DOCUMENT - Index documents for search");
+    console.error("  5. RETRIEVAL_QUERY - Search queries");
+    console.error("  6. CODE_RETRIEVAL_QUERY - Search code by description");
+    console.error("  7. QUESTION_ANSWERING - Chatbot questions");
+    console.error("  8. FACT_VERIFICATION - Verify statements");
+
+    if (context) {
+      console.error(`\nContext: ${context}`);
+    }
+
+    // Default to RETRIEVAL_DOCUMENT as most common use case
+    return EmbeddingTaskType.RETRIEVAL_DOCUMENT;
+  }
+
+  /**
+   * Get task type recommendation based on context
+   */
+  private getTaskTypeRecommendation(
+    context: string,
+    samples: string[]
+  ): { taskType: EmbeddingTaskType; confidence: number; reasoning: string } {
+    const contextLower = context.toLowerCase();
+
+    if (contextLower.includes("similar") || contextLower.includes("recommend")) {
+      return {
+        taskType: EmbeddingTaskType.SEMANTIC_SIMILARITY,
+        confidence: 0.9,
+        reasoning: "Context mentions finding similar content"
+      };
+    }
+
+    if (contextLower.includes("categor") || contextLower.includes("classif")) {
+      return {
+        taskType: EmbeddingTaskType.CLASSIFICATION,
+        confidence: 0.9,
+        reasoning: "Context mentions categorization or classification"
+      };
+    }
+
+    if (contextLower.includes("search") || contextLower.includes("retriev")) {
+      return {
+        taskType: EmbeddingTaskType.RETRIEVAL_DOCUMENT,
+        confidence: 0.8,
+        reasoning: "Context mentions search or retrieval"
+      };
+    }
+
+    // Default
+    return {
+      taskType: EmbeddingTaskType.RETRIEVAL_DOCUMENT,
+      confidence: 0.5,
+      reasoning: "Default to document retrieval (most common use case)"
+    };
+  }
+
+  /**
+   * Prompt user for output location
+   */
+  private async promptForOutputLocation(
+    defaultLocation: string = process.cwd()
+  ): Promise<string> {
+    // In MCP context, we can't do interactive prompts easily
+    // Return default and log guidance
+    console.error(`[Batch] Using default output location: ${defaultLocation}`);
+    console.error("To specify custom location, pass 'output_location' parameter");
+    return defaultLocation;
   }
 
   private async handleMultipleUpload(args: any) {
