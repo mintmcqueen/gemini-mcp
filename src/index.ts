@@ -749,6 +749,18 @@ class GeminiMCPServer {
             return await this.handleBatchIngestContent(args);
           case "batch_process":
             return await this.handleBatchProcess(args);
+          case "batch_create_embeddings":
+            return await this.handleBatchCreateEmbeddings(args);
+          case "batch_process_embeddings":
+            return await this.handleBatchProcessEmbeddings(args);
+          case "batch_ingest_embeddings":
+            return await this.handleBatchIngestEmbeddings(args);
+          case "batch_query_task_type":
+            return await this.handleBatchQueryTaskType(args);
+          case "batch_cancel":
+            return await this.handleBatchCancel(args);
+          case "batch_delete":
+            return await this.handleBatchDelete(args);
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -2272,6 +2284,549 @@ class GeminiMCPServer {
           {
             type: "text",
             text: `Error in batch process workflow: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_create_embeddings tool
+   * Creates batch job for embeddings generation
+   */
+  private async handleBatchCreateEmbeddings(args: any) {
+    const model = args?.model || MODELS.EMBEDDING;
+    const requests = args?.requests;
+    const inputFileUri = args?.inputFileUri;
+    const taskType = args?.taskType;
+    const displayName = args?.displayName;
+    const outputLocation = args?.outputLocation || process.cwd();
+
+    if (!taskType || typeof taskType !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "taskType is required. Use batch_query_task_type for guidance on task type selection."
+      );
+    }
+
+    if (!requests && !inputFileUri) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "Either 'requests' (inline) or 'inputFileUri' (file-based) must be provided"
+      );
+    }
+
+    try {
+      console.error(`[Batch Embeddings] Creating embeddings batch job with model: ${model}, taskType: ${taskType}`);
+      const genAI = await this.getGenAI();
+
+      // Build batch creation params for embeddings
+      const batchParams: any = {
+        model,
+        config: {
+          taskType,
+        },
+      };
+
+      if (displayName) {
+        batchParams.displayName = displayName;
+      }
+
+      // Choose inline or file-based mode
+      if (requests) {
+        console.error(`[Batch Embeddings] Using inline mode with ${requests.length} requests`);
+        batchParams.requests = requests;
+      } else {
+        console.error(`[Batch Embeddings] Using file-based mode with file: ${inputFileUri}`);
+        batchParams.src = inputFileUri;
+      }
+
+      // Create the batch job
+      const batchJob = await genAI.batches.create(batchParams);
+
+      console.error(`[Batch Embeddings] Batch job created: ${batchJob.name}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Embeddings batch job created successfully",
+              batchName: batchJob.name,
+              displayName: batchJob.displayName,
+              state: batchJob.state,
+              createTime: batchJob.createTime,
+              model,
+              taskType,
+              outputLocation,
+              nextSteps: [
+                `Use batch_get_status with batchName: "${batchJob.name}" to monitor progress`,
+                `Use batch_download_results when state is SUCCEEDED`,
+              ],
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Embeddings] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error creating embeddings batch job: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_process_embeddings tool
+   * Complete embeddings workflow with task type selection
+   */
+  private async handleBatchProcessEmbeddings(args: any) {
+    const inputFile = args?.inputFile;
+    const taskType = args?.taskType;
+    const model = args?.model || MODELS.EMBEDDING;
+    const outputLocation = args?.outputLocation || process.cwd();
+    const pollIntervalSeconds = args?.pollIntervalSeconds || 30;
+
+    if (!inputFile || typeof inputFile !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "inputFile is required and must be a string path"
+      );
+    }
+
+    try {
+      console.error(`[Batch Process Embeddings] Starting complete embeddings workflow for: ${inputFile}`);
+
+      // Step 0: Determine task type if not provided
+      let finalTaskType = taskType;
+      if (!finalTaskType) {
+        console.error(`[Batch Process Embeddings] Task type not provided, prompting user...`);
+        const taskTypeResult = await this.handleBatchQueryTaskType({
+          context: `Embeddings batch processing for file: ${inputFile}`,
+        });
+        const taskTypeData = JSON.parse(taskTypeResult.content[0].text);
+        finalTaskType = taskTypeData.selectedTaskType;
+        console.error(`[Batch Process Embeddings] User selected task type: ${finalTaskType}`);
+      }
+
+      // Step 1: Ingest embeddings content
+      console.error(`[Batch Process Embeddings] Step 1/5: Ingesting embeddings content...`);
+      const ingestResult = await this.handleBatchIngestEmbeddings({
+        inputFile,
+      });
+
+      const ingestData = JSON.parse(ingestResult.content[0].text);
+
+      if (!ingestData.validationPassed) {
+        throw new Error(`Embeddings content ingestion failed: ${ingestData.errors.join(', ')}`);
+      }
+
+      const jsonlFile = ingestData.outputFile;
+      console.error(`[Batch Process Embeddings] JSONL created: ${jsonlFile}`);
+
+      // Step 2: Upload JSONL file
+      console.error(`[Batch Process Embeddings] Step 2/5: Uploading JSONL file...`);
+      const uploadResult = await this.handleUploadFile({
+        filePath: jsonlFile,
+        displayName: `embeddings-batch-input-${Date.now()}.jsonl`,
+      });
+
+      const uploadData = JSON.parse(uploadResult.content[0].text);
+      const fileUri = uploadData.uri;
+      console.error(`[Batch Process Embeddings] File uploaded: ${fileUri}`);
+
+      // Step 3: Create embeddings batch job
+      console.error(`[Batch Process Embeddings] Step 3/5: Creating embeddings batch job...`);
+      const createResult = await this.handleBatchCreateEmbeddings({
+        model,
+        inputFileUri: fileUri,
+        taskType: finalTaskType,
+        displayName: `embeddings-batch-${Date.now()}`,
+        outputLocation,
+      });
+
+      const createData = JSON.parse(createResult.content[0].text);
+      const batchName = createData.batchName;
+      console.error(`[Batch Process Embeddings] Batch job created: ${batchName}`);
+
+      // Step 4: Poll until complete
+      console.error(`[Batch Process Embeddings] Step 4/5: Polling for completion...`);
+      const statusResult = await this.handleBatchGetStatus({
+        batchName,
+        autoPoll: true,
+        pollIntervalSeconds,
+        maxWaitMs: 86400000,
+      });
+
+      const statusData = JSON.parse(statusResult.content[0].text);
+
+      if (statusData.state !== BatchJobState.JOB_STATE_SUCCEEDED) {
+        throw new Error(`Batch job failed with state: ${statusData.state}`);
+      }
+
+      console.error(`[Batch Process Embeddings] Batch job completed successfully`);
+
+      // Step 5: Download results
+      console.error(`[Batch Process Embeddings] Step 5/5: Downloading results...`);
+      const downloadResult = await this.handleBatchDownloadResults({
+        batchName,
+        outputLocation,
+      });
+
+      const downloadData = JSON.parse(downloadResult.content[0].text);
+
+      console.error(`[Batch Process Embeddings] Complete workflow finished successfully`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Embeddings batch process completed successfully",
+              workflow: {
+                step0_taskType: { taskType: finalTaskType },
+                step1_ingest: {
+                  sourceFile: ingestData.sourceFile,
+                  jsonlFile: ingestData.outputFile,
+                  requestCount: ingestData.requestCount,
+                },
+                step2_upload: { fileUri, state: uploadData.state },
+                step3_create: { batchName, state: createData.state },
+                step4_poll: { finalState: statusData.state, stats: statusData.stats },
+                step5_download: { resultCount: downloadData.resultCount, outputFile: downloadData.outputFile },
+              },
+              embeddings: downloadData.results,
+              outputFile: downloadData.outputFile,
+              summary: {
+                inputFile,
+                model,
+                taskType: finalTaskType,
+                totalRequests: ingestData.requestCount,
+                embeddingDimensions: 1536,
+                resultsFile: downloadData.outputFile,
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Process Embeddings] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error in embeddings batch process: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_ingest_embeddings tool
+   * Specialized ingestion for embeddings (extracts text for embedding)
+   */
+  private async handleBatchIngestEmbeddings(args: any) {
+    const inputFile = args?.inputFile;
+    const outputFile = args?.outputFile;
+    const textField = args?.textField;
+
+    if (!inputFile || typeof inputFile !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "inputFile is required and must be a string path"
+      );
+    }
+
+    try {
+      console.error(`[Embeddings Ingest] Analyzing content for embeddings: ${inputFile}`);
+
+      // Analyze content structure
+      const analysis = await this.analyzeContentStructure(inputFile);
+      console.error(`[Embeddings Ingest] Detected format: ${analysis.format}`);
+
+      // Generate output path
+      const path = await import("path");
+      const finalOutputFile = outputFile || inputFile.replace(path.extname(inputFile), '.embeddings.jsonl');
+
+      // Convert to embeddings JSONL format
+      const fs = await import("fs/promises");
+      const content = await fs.readFile(inputFile, 'utf-8');
+      const jsonlLines: string[] = [];
+      const errors: string[] = [];
+
+      try {
+        switch (analysis.format) {
+          case "json":
+            const parsed = JSON.parse(content);
+            const items = Array.isArray(parsed) ? parsed : [parsed];
+            items.forEach((item, i) => {
+              const text = textField ? item[textField] : (typeof item === 'string' ? item : JSON.stringify(item));
+              jsonlLines.push(JSON.stringify({
+                key: `embedding-${i + 1}`,
+                request: {
+                  content: { parts: [{ text }] },
+                },
+              }));
+            });
+            break;
+
+          case "csv":
+            const lines = content.split('\n').filter(l => l.trim());
+            const header = lines[0].split(',');
+            const textFieldIndex = textField ? header.indexOf(textField) : 0;
+
+            lines.slice(1).forEach((line, i) => {
+              const fields = line.split(',');
+              const text = fields[textFieldIndex] || line;
+              jsonlLines.push(JSON.stringify({
+                key: `embedding-${i + 1}`,
+                request: {
+                  content: { parts: [{ text }] },
+                },
+              }));
+            });
+            break;
+
+          case "text":
+          case "jsonl":
+            const textLines = content.split('\n').filter(l => l.trim());
+            textLines.forEach((line, i) => {
+              jsonlLines.push(JSON.stringify({
+                key: `embedding-${i + 1}`,
+                request: {
+                  content: { parts: [{ text: line }] },
+                },
+              }));
+            });
+            break;
+
+          default:
+            errors.push(`Unsupported format for embeddings: ${analysis.format}`);
+        }
+
+        if (jsonlLines.length > 0) {
+          await fs.writeFile(finalOutputFile, jsonlLines.join('\n'));
+        }
+
+      } catch (error: any) {
+        errors.push(`Conversion error: ${error.message}`);
+      }
+
+      // Validate
+      const validation = await this.validateJSONL(finalOutputFile);
+
+      console.error(`[Embeddings Ingest] Ingestion complete: ${jsonlLines.length} embeddings`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: validation.valid ? "Embeddings content ingestion successful" : "Ingestion completed with errors",
+              sourceFile: inputFile,
+              outputFile: finalOutputFile,
+              format: analysis.format,
+              requestCount: jsonlLines.length,
+              validationPassed: validation.valid,
+              errors: validation.valid ? undefined : validation.errors,
+              nextSteps: validation.valid
+                ? [
+                    `Upload JSONL: use upload_file with path "${finalOutputFile}"`,
+                    `Create embeddings batch: use batch_create_embeddings with file URI and task type`,
+                  ]
+                : [`Review errors and fix source file`],
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Embeddings Ingest] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error ingesting embeddings content: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_query_task_type tool
+   * Interactive task type selector with AI recommendations
+   */
+  private async handleBatchQueryTaskType(args: any) {
+    const context = args?.context;
+    const sampleContent = args?.sampleContent || [];
+
+    try {
+      console.error(`[Task Type Query] Providing task type guidance...`);
+
+      // Get recommendation if context/samples provided
+      let recommendation;
+      if (context || sampleContent.length > 0) {
+        recommendation = this.getTaskTypeRecommendation(
+          context || "General embeddings task",
+          sampleContent
+        );
+        console.error(`[Task Type Query] AI recommendation: ${recommendation.taskType} (confidence: ${recommendation.confidence})`);
+      }
+
+      // Use the prompt helper to get user selection
+      const selectedTaskType = await this.promptForTaskType(context, sampleContent);
+
+      console.error(`[Task Type Query] Task type selected: ${selectedTaskType}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Task type selection complete",
+              selectedTaskType,
+              recommendation: recommendation || undefined,
+              taskTypeDescriptions: {
+                SEMANTIC_SIMILARITY: "Compare text similarity - Best for: finding similar documents, duplicate detection",
+                CLASSIFICATION: "Categorize text - Best for: content categorization, sentiment analysis",
+                CLUSTERING: "Group similar items - Best for: topic modeling, content organization",
+                RETRIEVAL_DOCUMENT: "Index for search - Best for: building search indexes, document databases",
+                RETRIEVAL_QUERY: "Search queries - Best for: query understanding, search applications",
+                CODE_RETRIEVAL_QUERY: "Code search - Best for: code search engines, developer tools",
+                QUESTION_ANSWERING: "Q&A systems - Best for: chatbots, FAQ systems",
+                FACT_VERIFICATION: "Check claims - Best for: fact-checking, verification systems",
+              },
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Task Type Query] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error querying task type: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_cancel tool
+   * Cancels a running batch job
+   */
+  private async handleBatchCancel(args: any) {
+    const batchName = args?.batchName;
+
+    if (!batchName || typeof batchName !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "batchName is required and must be a string"
+      );
+    }
+
+    try {
+      console.error(`[Batch Cancel] Cancelling batch job: ${batchName}`);
+      const genAI = await this.getGenAI();
+
+      // Request cancellation
+      await genAI.batches.cancel({ name: batchName });
+
+      // Get updated status
+      const batchJob = await genAI.batches.get({ name: batchName }) as BatchJob;
+
+      console.error(`[Batch Cancel] Batch job cancelled: ${batchJob.state}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Batch job cancellation requested",
+              batchName: batchJob.name,
+              state: batchJob.state,
+              note: "Job may take a few seconds to transition to CANCELLED state",
+              stats: batchJob.batchStats,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Cancel] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error cancelling batch job: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  /**
+   * Handler for batch_delete tool
+   * Deletes a batch job and its data
+   */
+  private async handleBatchDelete(args: any) {
+    const batchName = args?.batchName;
+
+    if (!batchName || typeof batchName !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "batchName is required and must be a string"
+      );
+    }
+
+    try {
+      console.error(`[Batch Delete] Deleting batch job: ${batchName}`);
+      const genAI = await this.getGenAI();
+
+      // Get job info before deletion
+      const batchJob = await genAI.batches.get({ name: batchName }) as BatchJob;
+
+      // Delete the job
+      await genAI.batches.delete({ name: batchName });
+
+      console.error(`[Batch Delete] Batch job deleted: ${batchName}`);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Batch job deleted successfully",
+              deletedJob: {
+                name: batchJob.name,
+                displayName: batchJob.displayName,
+                state: batchJob.state,
+                stats: batchJob.batchStats,
+              },
+              warning: "This operation is irreversible. Results cannot be recovered.",
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error(`[Batch Delete] Error:`, error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error deleting batch job: ${error.message}`,
           },
         ],
         isError: true,
