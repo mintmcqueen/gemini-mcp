@@ -22,6 +22,9 @@ import {
   BatchJobState,
   EmbeddingTaskType,
   ContentIngestionReport,
+  ImageGenerationArgs,
+  GeneratedImage,
+  ImageGenerationResponse,
 } from "./types/gemini.js";
 import { createPartFromUri } from "@google/genai";
 
@@ -30,6 +33,7 @@ const MODELS = {
   FLASH_25: "gemini-2.5-flash",
   FLASH_20: "gemini-2.0-flash-exp",
   EMBEDDING: "gemini-embedding-001",
+  IMAGE_GEN: "gemini-2.5-flash-image",
 } as const;
 
 // Upload configuration - balanced for typical 1-10 file use cases
@@ -715,6 +719,48 @@ class GeminiMCPServer {
               required: ["batchName"],
             },
           },
+          {
+            name: "generate_images",
+            description: "GENERATE OR EDIT IMAGES - Create images from text prompts or edit existing images using Gemini 2.5 Flash Image model. CAPABILITIES: Text-to-image generation, image editing with instructions, multiple image generation (1-4 images), configurable aspect ratios. WORKFLOW: 1) Provide text prompt, 2) Optionally specify aspect ratio and number of images, 3) For editing: provide inputImageUri from uploaded file, 4) Images auto-saved to outputDir and returned as base64. RETURNS: Array of generated images with file paths and base64 data. COST: 1,290 tokens per image. All images include SynthID watermark.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                prompt: {
+                  type: "string",
+                  description: "Text description of image to generate or editing instructions for existing image",
+                },
+                aspectRatio: {
+                  type: "string",
+                  enum: ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"],
+                  description: "Image aspect ratio (default: 1:1 for new, matches input for editing)",
+                  default: "1:1",
+                },
+                numImages: {
+                  type: "number",
+                  minimum: 1,
+                  maximum: 4,
+                  description: "Number of images to generate (default: 1)",
+                  default: 1,
+                },
+                inputImageUri: {
+                  type: "string",
+                  description: "Optional file URI from uploaded file for image editing (omit for text-to-image)",
+                },
+                outputDir: {
+                  type: "string",
+                  description: "Directory to save generated images (default: ./generated-images)",
+                },
+                temperature: {
+                  type: "number",
+                  minimum: 0,
+                  maximum: 2,
+                  description: "Controls randomness (0.0-2.0, default: 1.0)",
+                  default: 1.0,
+                },
+              },
+              required: ["prompt"],
+            },
+          },
         ],
       })
     );
@@ -765,6 +811,8 @@ class GeminiMCPServer {
             return await this.handleBatchCancel(args);
           case "batch_delete":
             return await this.handleBatchDelete(args);
+          case "generate_images":
+            return await this.handleGenerateImages(args);
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -2853,6 +2901,189 @@ class GeminiMCPServer {
         isError: true,
       };
     }
+  }
+
+  private async handleGenerateImages(args: any) {
+    const prompt = args?.prompt;
+    const aspectRatio = args?.aspectRatio || "1:1";
+    const numImages = args?.numImages || 1;
+    const outputDir = args?.outputDir || "./generated-images";
+    const inputImageUri = args?.inputImageUri;
+    const temperature = args?.temperature || 1.0;
+
+    // Validate prompt
+    if (!prompt || typeof prompt !== "string") {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "prompt is required and must be a string"
+      );
+    }
+
+    // Validate aspect ratio
+    const validAspectRatios = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+    if (!validAspectRatios.includes(aspectRatio)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Invalid aspect ratio. Must be one of: ${validAspectRatios.join(", ")}`
+      );
+    }
+
+    // Validate numImages
+    if (typeof numImages !== "number" || numImages < 1 || numImages > 4) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "numImages must be a number between 1 and 4"
+      );
+    }
+
+    try {
+      const fs = await import("fs/promises");
+
+      // Create output directory if it doesn't exist
+      try {
+        await fs.access(outputDir);
+      } catch {
+        await fs.mkdir(outputDir, { recursive: true });
+        console.error(`[Image Generation] Created output directory: ${outputDir}`);
+      }
+
+      // Build request contents
+      const contents: any[] = [];
+
+      // Add input image for editing if provided
+      if (inputImageUri) {
+        const fileObj = this.fileObjects.get(inputImageUri);
+        if (!fileObj) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Input image not found in cache: ${inputImageUri}. Please upload the image first using upload_file tool.`
+          );
+        }
+
+        contents.push({
+          fileData: {
+            fileUri: fileObj.uri,
+            mimeType: fileObj.mimeType,
+          },
+        });
+        console.error(`[Image Generation] Using input image for editing: ${inputImageUri}`);
+      }
+
+      // Add prompt
+      contents.push(prompt);
+
+      console.error(`[Image Generation] Generating ${numImages} image(s) with aspect ratio ${aspectRatio}`);
+      console.error(`[Image Generation] Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? "..." : ""}`);
+
+      // Generate images using Gemini API
+      // Note: Gemini API only supports single image per request, so we make multiple calls for numImages > 1
+      const genAI = await this.getGenAI();
+      const images: GeneratedImage[] = [];
+      const timestamp = Date.now();
+      let totalTokens = 0;
+
+      // Generate each image in sequence (API limitation: 1 image per call)
+      for (let i = 0; i < numImages; i++) {
+        console.error(`[Image Generation] Generating image ${i + 1}/${numImages}...`);
+
+        const result = await genAI.models.generateContent({
+          model: MODELS.IMAGE_GEN,
+          contents,
+          config: {
+            temperature,
+            responseModalities: ["Image"],
+            imageConfig: {
+              aspectRatio,
+            },
+          },
+        });
+
+        // Extract and process image from this generation
+        if (result.candidates && result.candidates.length > 0) {
+          for (const candidate of result.candidates) {
+            if (candidate.content && candidate.content.parts) {
+              for (const part of candidate.content.parts) {
+                if (part.inlineData) {
+                  const base64Data = part.inlineData.data;
+                  const mimeType = part.inlineData.mimeType || "image/png";
+
+                  // Get file extension from mime type
+                  const extension = this.getMimeTypeExtension(mimeType);
+                  const filename = `image_${timestamp}_${images.length + 1}.${extension}`;
+                  const filePath = path.join(outputDir, filename);
+
+                  // Save to disk
+                  const buffer = Buffer.from(base64Data, "base64");
+                  await fs.writeFile(filePath, buffer);
+
+                  console.error(`[Image Generation] Saved image ${images.length + 1} to: ${filePath}`);
+
+                  images.push({
+                    base64Data,
+                    mimeType,
+                    filePath,
+                    aspectRatio,
+                    index: images.length,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        // Track token usage
+        totalTokens += result.usageMetadata?.totalTokenCount || 1290;
+      }
+
+      if (images.length === 0) {
+        throw new Error("No images were generated. The response did not contain image data.");
+      }
+
+      console.error(`[Image Generation] Successfully generated ${images.length} image(s)`);
+
+      // Prepare response
+      const responseData: ImageGenerationResponse = {
+        images,
+        prompt,
+        model: MODELS.IMAGE_GEN,
+        usage: {
+          totalTokens,
+          imagesGenerated: images.length,
+        },
+        outputDir,
+      };
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(responseData, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      console.error("[Image Generation] Error:", error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error generating images: ${error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private getMimeTypeExtension(mimeType: string): string {
+    const map: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/webp": "webp",
+      "image/gif": "gif",
+    };
+    return map[mimeType] || "png";
   }
 
   private getMimeType(filePath: string): string {

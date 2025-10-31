@@ -153,3 +153,33 @@ export interface BatchEmbeddingParams {
   displayName?: string;
   outputLocation?: string;
 }
+
+// Image generation types
+
+export interface ImageGenerationArgs {
+  prompt: string;
+  aspectRatio?: "1:1" | "2:3" | "3:2" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
+  numImages?: number; // 1-4
+  outputDir?: string; // Where to save images
+  inputImageUri?: string; // For image editing (optional file URI)
+  temperature?: number;
+}
+
+export interface GeneratedImage {
+  base64Data: string;
+  mimeType: string;
+  filePath?: string; // If auto-saved
+  aspectRatio: string;
+  index: number;
+}
+
+export interface ImageGenerationResponse {
+  images: GeneratedImage[];
+  prompt: string;
+  model: string;
+  usage: {
+    totalTokens: number;
+    imagesGenerated: number;
+  };
+  outputDir?: string;
+}

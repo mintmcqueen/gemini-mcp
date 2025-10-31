@@ -1,26 +1,25 @@
 # Gemini MCP Server
 
-An MCP Server that provides access to Google's Gemini models with **file uploads** and **Batch API integration**.
+An MCP Server that provides access to the Gemini Suite.
 
 ## ✨ Features
 
-- **Multiple Gemini Models on Request**: Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash, and Embedding-001 upon
-- **🆕 Batch API Integration (v0.3.0)**: Async processing at 50% cost with ~24hr turnaround
-  - 11 batch tools for content generation and embeddings
-  - Intelligent JSONL conversion (CSV, JSON, TXT, MD)
-  - Complete workflow automation
-  - 8 embedding task types with AI recommendations
-- **Advanced File Handling**: Upload and process 40+ files with batch support
-- **Automatic Configuration**: Interactive API key setup for Claude Code & Claude Desktop
-- **Conversation Management**: Multi-turn conversations with history tracking
-- **Type Safety**: Full TypeScript implementation with proper type definitions
-- **Production Ready**: Retry logic, error handling, and file state monitoring
+- Support for 1.5 through 2.5 pro
+- Nano Banana
+- Embeddings
+- File Upload
+- Batch (NLP and Embeddings)
+
 
 ## 🚀 Quick Start
 
-### Option 1: Global Install (Recommended for Claude Code)
+### Option 1: Global Install
 
 ```bash
+# NPX global install
+claude mcp add --transport stdio gemini --scope user --env GEMINI_API_KEY=YOUR_KEY_HERE -- npx -y @mintmcqueen/gemini-mcp
+
+# Or
 # Install globally
 npm install -g @mintmcqueen/gemini-mcp
 
@@ -37,69 +36,8 @@ npm install @mintmcqueen/gemini-mcp
 # Add to Claude Code (adjust path as needed)
 claude mcp add --transport stdio gemini --scope project --env GEMINI_API_KEY=YOUR_KEY_HERE -- node node_modules/@mintmcqueen/gemini-mcp/build/index.js
 ```
-
 After any installation method, restart Claude Code and you're ready to use Gemini.
 
-## 🔑 API Key Setup
-
-### Get Your API Key
-
-1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Create a new API key (free)
-3. Copy your key (starts with "AIza...")
-
-### Configure Anytime
-
-```bash
-npm run configure
-```
-
-The configuration wizard will:
-- Validate your API key format
-- Test the key with a real Gemini API request
-- Write configuration to your chosen location(s)
-- Provide next steps
-
-## 📦 What Gets Configured
-
-### Claude Code (Global Install)
-- **File:** `~/.claude.json` (user scope)
-- **Format:** stdio MCP server with environment variables
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "type": "stdio",
-      "command": "gemini-mcp",
-      "env": {
-        "GEMINI_API_KEY": "your-key-here"
-      }
-    }
-  }
-}
-```
-
-### Claude Code (Local Install)
-- **File:** `.mcp.json` (project scope)
-- **Format:** stdio MCP server with node execution
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["node_modules/@mintmcqueen/gemini-mcp/build/index.js"],
-      "env": {
-        "GEMINI_API_KEY": "your-key-here"
-      }
-    }
-  }
-}
-```
-
-### Claude Desktop
-- **File:** `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
-- **Format:** Standard MCP server configuration
 
 ### Shell Environment
 - **File:** `~/.zshrc` or `~/.bashrc`
@@ -133,6 +71,48 @@ Clear a conversation session.
 
 Parameters:
 - `id` (required): Conversation ID to clear
+
+#### `generate_images`
+Generate images from text prompts or edit existing images using Gemini 2.5 Flash Image model.
+
+Parameters:
+- `prompt` (required): Text description of image to generate or editing instructions
+- `aspectRatio` (optional): Image aspect ratio - `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9` (default: `1:1`)
+- `numImages` (optional): Number of images to generate, 1-4 (default: `1`). Note: Makes sequential API calls, ~10-15s per image.
+- `inputImageUri` (optional): File URI from uploaded file for image editing (omit for text-to-image generation)
+- `outputDir` (optional): Directory to save generated images (default: `./generated-images`)
+- `temperature` (optional): Controls randomness (0.0-2.0, default: 1.0)
+
+Returns:
+- Array of generated images with file paths and base64 data
+- Token usage (~1,290-1,300 tokens per image)
+- All images include SynthID watermark
+
+**Performance Note:** The Gemini API generates one image per request. When `numImages > 1`, the tool makes multiple sequential API calls to generate the requested number of images. Expect ~10-15 seconds per image.
+
+**Text-to-Image Example:**
+```javascript
+generate_images({
+  prompt: "A photorealistic coffee cup on a wooden table",
+  aspectRatio: "16:9",
+  numImages: 2
+})
+// Generates 2 images saved to ./generated-images/
+```
+
+**Image Editing Example:**
+```javascript
+// First, upload the image to edit
+upload_file({ filePath: "./photo.jpg" })
+// Returns: { uri: "files/abc123" }
+
+// Then edit it
+generate_images({
+  prompt: "Add a wizard hat to the subject",
+  inputImageUri: "files/abc123"
+})
+// Generates edited image saved to ./generated-images/
+```
 
 ### 🆕 Batch API Tools (v0.3.0)
 
