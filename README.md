@@ -13,28 +13,30 @@ An MCP Server that provides access to the Gemini Suite.
 
 ## 🚀 Quick Start
 
-### Option 1: Global Install
+### Option 1: NPX (No Install Required)
 
 ```bash
-# NPX global install
-claude mcp add --transport stdio gemini --scope user --env GEMINI_API_KEY=YOUR_KEY_HERE -- npx -y @mintmcqueen/gemini-mcp
+claude mcp add gemini -s user --env GEMINI_API_KEY=YOUR_KEY_HERE -- npx -y @mintmcqueen/gemini-mcp@latest
+```
 
-# Or
+### Option 2: Global Install
+
+```bash
 # Install globally
 npm install -g @mintmcqueen/gemini-mcp
 
 # Add to Claude Code
-claude mcp add --transport stdio gemini --scope user --env GEMINI_API_KEY=YOUR_KEY_HERE -- gemini-mcp
+claude mcp add gemini -s user --env GEMINI_API_KEY=YOUR_KEY_HERE -- gemini-mcp
 ```
 
-### Option 2: Local Project Install
+### Option 3: Local Project Install
 
 ```bash
 # Install in your project
 npm install @mintmcqueen/gemini-mcp
 
 # Add to Claude Code (adjust path as needed)
-claude mcp add --transport stdio gemini --scope project --env GEMINI_API_KEY=YOUR_KEY_HERE -- node node_modules/@mintmcqueen/gemini-mcp/build/index.js
+claude mcp add gemini -s project --env GEMINI_API_KEY=YOUR_KEY_HERE -- node node_modules/@mintmcqueen/gemini-mcp/build/index.js
 ```
 After any installation method, restart Claude Code and you're ready to use Gemini.
 
