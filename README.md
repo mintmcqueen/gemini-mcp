@@ -2,6 +2,10 @@
 
 An MCP Server that provides access to the Gemini Suite.
 
+<a href="https://glama.ai/mcp/servers/@mintmcqueen/gemini-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@mintmcqueen/gemini-mcp/badge" alt="Gemini Server MCP server" />
+</a>
+
 ## ✨ Features
 
 - Support for 1.5 through 2.5 pro
