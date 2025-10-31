@@ -1,17 +1,13 @@
 {
   "name": "@mintmcqueen/gemini-mcp",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Enhanced MCP server for Google Gemini with Image Generation, Batch API integration (50% cost, async processing), advanced file handling, and conversation management. Supports image generation/editing, 11 batch tools for content generation and embeddings. Includes automatic API key configuration for Claude Code and Claude Desktop.",
   "type": "module",
   "main": "build/index.js",
-  "bin": {
-    "gemini-mcp": "build/index.js",
-    "gemini-mcp-configure": "scripts/configure.js"
-  },
+  "bin": "build/index.js",
   "files": [
     "build/**/*",
     "!build/test/**",
-    "scripts/**/*",
     "README.md",
     "ENHANCEMENTS.md",
     "LICENSE",
@@ -19,12 +15,11 @@
     "claude_desktop_config.example.json"
   ],
   "scripts": {
-    "build": "tsc && node scripts/postbuild.js",
+    "build": "tsc && chmod +x build/index.js",
     "watch": "tsc --watch",
     "start": "node build/index.js",
     "dev": "tsc --watch & nodemon build/index.js",
     "inspector": "npx @modelcontextprotocol/inspector node build/index.js",
-    "configure": "node scripts/configure.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

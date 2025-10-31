@@ -3,7 +3,7 @@ src/
 tsconfig.json
 
 # Test files
-test/
+tests/
 *.test.js
 *.test.ts
 *.spec.js

@@ -38,7 +38,6 @@ claude mcp add --transport stdio gemini --scope project --env GEMINI_API_KEY=YOU
 ```
 After any installation method, restart Claude Code and you're ready to use Gemini.
 
-
 ### Shell Environment
 - **File:** `~/.zshrc` or `~/.bashrc`
 - **Format:** `export GEMINI_API_KEY="your-key-here"`
@@ -229,7 +228,6 @@ npm run build        # Build TypeScript
 npm run watch        # Watch mode
 npm run dev          # Build + auto-restart
 npm run inspector    # Debug with MCP Inspector
-npm run configure    # Reconfigure API key
 ```
 ### Connection Failures
 
