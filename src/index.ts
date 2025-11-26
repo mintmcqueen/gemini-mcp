@@ -29,11 +29,17 @@ import {
 import { createPartFromUri } from "@google/genai";
 
 const MODELS = {
-  PRO: "gemini-2.5-pro",
+  // Gemini 3 models (newest - default)
+  PRO_3: "gemini-3-pro-preview",
+  IMAGE_GEN_3: "gemini-3-pro-image-preview",
+  // Gemini 2.5 models
+  PRO_25: "gemini-2.5-pro",
   FLASH_25: "gemini-2.5-flash",
+  IMAGE_GEN_25: "gemini-2.5-flash-image",
+  // Gemini 2.0 models
   FLASH_20: "gemini-2.0-flash-exp",
+  // Utility models
   EMBEDDING: "gemini-embedding-001",
-  IMAGE_GEN: "gemini-2.5-flash-image",
 } as const;
 
 // Upload configuration - balanced for typical 1-10 file use cases
@@ -165,22 +171,46 @@ class GeminiMCPServer {
           const modelsInfo = {
             models: [
               {
-                name: MODELS.PRO,
-                description: "Most powerful model for complex reasoning and coding",
-                capabilities: ["text", "images", "thinking", "tools"],
-                maxTokens: 8192,
+                name: MODELS.PRO_3,
+                description: "Gemini 3 Pro (DEFAULT) - Most intelligent model with state-of-the-art reasoning, multimodal understanding, and agentic capabilities",
+                capabilities: ["text", "images", "video", "audio", "thinking", "tools", "search"],
+                maxTokens: 65536,
+                inputTokenLimit: 1048576,
+              },
+              {
+                name: MODELS.IMAGE_GEN_3,
+                description: "Gemini 3 Pro Image - Advanced image generation and editing with thinking support",
+                capabilities: ["text", "images", "image-generation", "thinking"],
+                maxTokens: 32768,
+                inputTokenLimit: 65536,
+              },
+              {
+                name: MODELS.PRO_25,
+                description: "Gemini 2.5 Pro - Advanced thinking model for complex reasoning, code, and STEM",
+                capabilities: ["text", "images", "video", "audio", "thinking", "tools"],
+                maxTokens: 65536,
+                inputTokenLimit: 1048576,
               },
               {
                 name: MODELS.FLASH_25,
-                description: "Gemini 2.5 Flash - Fast performance for everyday tasks",
-                capabilities: ["text", "images", "thinking", "tools"],
-                maxTokens: 8192,
+                description: "Gemini 2.5 Flash - Fast performance with thinking for everyday tasks",
+                capabilities: ["text", "images", "video", "audio", "thinking", "tools"],
+                maxTokens: 65536,
+                inputTokenLimit: 1048576,
+              },
+              {
+                name: MODELS.IMAGE_GEN_25,
+                description: "Gemini 2.5 Flash Image - Fast image generation and editing",
+                capabilities: ["text", "images", "image-generation"],
+                maxTokens: 32768,
+                inputTokenLimit: 65536,
               },
               {
                 name: MODELS.FLASH_20,
-                description: "Gemini 2.0 Flash - Experimental fast model",
+                description: "Gemini 2.0 Flash - Legacy fast model",
                 capabilities: ["text", "images", "tools"],
                 maxTokens: 8192,
+                inputTokenLimit: 1048576,
               },
             ],
           };
@@ -265,9 +295,9 @@ class GeminiMCPServer {
                 },
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
                   description: "The Gemini model to use",
-                  default: MODELS.PRO,
+                  default: MODELS.PRO_3,
                 },
                 fileUris: {
                   type: "array",
@@ -430,7 +460,7 @@ class GeminiMCPServer {
               properties: {
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
                   description: "Gemini model for content generation",
                   default: MODELS.FLASH_25,
                 },
@@ -482,7 +512,7 @@ class GeminiMCPServer {
                 },
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
                   description: "Gemini model for content generation",
                   default: MODELS.FLASH_25,
                 },
@@ -721,13 +751,19 @@ class GeminiMCPServer {
           },
           {
             name: "generate_images",
-            description: "GENERATE OR EDIT IMAGES - Create images from text prompts or edit existing images using Gemini 2.5 Flash Image model. CAPABILITIES: Text-to-image generation, image editing with instructions, multiple image generation (1-4 images), configurable aspect ratios. WORKFLOW: 1) Provide text prompt, 2) Optionally specify aspect ratio and number of images, 3) For editing: provide inputImageUri from uploaded file, 4) Images auto-saved to outputDir and returned as base64. RETURNS: Array of generated images with file paths and base64 data. COST: 1,290 tokens per image. All images include SynthID watermark.",
+            description: "GENERATE OR EDIT IMAGES - Create images from text prompts or edit existing images using Gemini image models. CAPABILITIES: Text-to-image generation, image editing with instructions, multiple image generation (1-4 images), configurable aspect ratios. MODELS: gemini-3-pro-image-preview (default, with thinking support) or gemini-2.5-flash-image (faster). WORKFLOW: 1) Provide text prompt, 2) Optionally specify model, aspect ratio, and number of images, 3) For editing: provide inputImageUri from uploaded file, 4) Images auto-saved to outputDir. RETURNS: Array of generated images with file paths. COST: ~1,290 tokens per image. All images include SynthID watermark.",
             inputSchema: {
               type: "object",
               properties: {
                 prompt: {
                   type: "string",
                   description: "Text description of image to generate or editing instructions for existing image",
+                },
+                model: {
+                  type: "string",
+                  enum: [MODELS.IMAGE_GEN_3, MODELS.IMAGE_GEN_25],
+                  description: "Image generation model (default: gemini-3-pro-image-preview)",
+                  default: MODELS.IMAGE_GEN_3,
                 },
                 aspectRatio: {
                   type: "string",
@@ -1367,7 +1403,7 @@ class GeminiMCPServer {
 
   private async handleChat(args: any) {
     const message = args?.message;
-    const model = args?.model || MODELS.PRO;
+    const model = args?.model || MODELS.PRO_3;
     const fileUris = args?.fileUris || [];
     const temperature = args?.temperature || 1.0;
     const maxTokens = args?.maxTokens || 15000;
@@ -2905,6 +2941,7 @@ class GeminiMCPServer {
 
   private async handleGenerateImages(args: any) {
     const prompt = args?.prompt;
+    const model = args?.model || MODELS.IMAGE_GEN_3;
     const aspectRatio = args?.aspectRatio || "1:1";
     const numImages = args?.numImages || 1;
     const outputDir = args?.outputDir || "./generated-images";
@@ -2987,7 +3024,7 @@ class GeminiMCPServer {
         console.error(`[Image Generation] Generating image ${i + 1}/${numImages}...`);
 
         const result = await genAI.models.generateContent({
-          model: MODELS.IMAGE_GEN,
+          model,
           contents,
           config: {
             temperature,
@@ -2998,30 +3035,33 @@ class GeminiMCPServer {
           },
         });
 
+        // Track token usage first
+        totalTokens += result.usageMetadata?.totalTokenCount || 1290;
+
         // Extract and process image from this generation
         if (result.candidates && result.candidates.length > 0) {
           for (const candidate of result.candidates) {
             if (candidate.content && candidate.content.parts) {
               for (const part of candidate.content.parts) {
-                if (part.inlineData) {
-                  const base64Data = part.inlineData.data;
+                if (part.inlineData && part.inlineData.data) {
+                  // CRITICAL: Extract base64 in minimal scope, convert to buffer immediately
+                  // Base64 string is NEVER stored - only used for Buffer conversion
                   const mimeType = part.inlineData.mimeType || "image/png";
-
-                  // Get file extension from mime type
                   const extension = this.getMimeTypeExtension(mimeType);
                   const filename = `image_${timestamp}_${images.length + 1}.${extension}`;
-                  const filePath = path.join(outputDir, filename);
+                  const absoluteFilePath = path.join(outputDir, filename);
 
-                  // Save to disk
-                  const buffer = Buffer.from(base64Data, "base64");
-                  await fs.writeFile(filePath, buffer);
+                  // Convert base64 to buffer and write to disk immediately
+                  // Base64 data is discarded after this line
+                  const buffer = Buffer.from(part.inlineData.data, "base64");
+                  await fs.writeFile(absoluteFilePath, buffer);
 
-                  console.error(`[Image Generation] Saved image ${images.length + 1} to: ${filePath}`);
+                  console.error(`[Image Generation] Saved image ${images.length + 1} to: ${absoluteFilePath}`);
 
+                  // ONLY push file metadata - NO base64Data field
                   images.push({
-                    base64Data,
                     mimeType,
-                    filePath,
+                    filePath: absoluteFilePath,
                     aspectRatio,
                     index: images.length,
                   });
@@ -3030,9 +3070,6 @@ class GeminiMCPServer {
             }
           }
         }
-
-        // Track token usage
-        totalTokens += result.usageMetadata?.totalTokenCount || 1290;
       }
 
       if (images.length === 0) {
@@ -3041,11 +3078,11 @@ class GeminiMCPServer {
 
       console.error(`[Image Generation] Successfully generated ${images.length} image(s)`);
 
-      // Prepare response
+      // Prepare response - file paths only, NO base64
       const responseData: ImageGenerationResponse = {
         images,
         prompt,
-        model: MODELS.IMAGE_GEN,
+        model,
         usage: {
           totalTokens,
           imagesGenerated: images.length,
@@ -3053,11 +3090,28 @@ class GeminiMCPServer {
         outputDir,
       };
 
+      // RUNTIME SAFETY CHECK: Validate response has no base64 data
+      const responseText = JSON.stringify(responseData, null, 2);
+
+      // Check for suspiciously long strings (base64 would be 1M+ chars)
+      if (responseText.length > 100000) {
+        console.error(`[Image Generation] WARNING: Response is ${responseText.length} chars - may contain base64!`);
+        throw new Error(`Response too large (${responseText.length} chars). Base64 data may have leaked into response. This is a bug.`);
+      }
+
+      // Check for base64-like patterns in field names or values
+      if (responseText.includes('"base64') || responseText.includes('"data":')) {
+        console.error('[Image Generation] WARNING: Response contains base64-like fields!');
+        throw new Error('Response contains suspicious base64-like fields. This is a bug.');
+      }
+
+      console.error(`[Image Generation] Response validated: ${responseText.length} chars (safe)`);
+
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(responseData, null, 2),
+            text: responseText,
           },
         ],
       };

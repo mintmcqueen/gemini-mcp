@@ -166,9 +166,10 @@ export interface ImageGenerationArgs {
 }
 
 export interface GeneratedImage {
-  base64Data: string;
+  // base64Data REMOVED - images are ONLY saved to disk, never included in response
+  // to avoid MCP token limits (base64 can be 1.8M+ tokens per image)
   mimeType: string;
-  filePath?: string; // If auto-saved
+  filePath: string; // Required - always saved to disk
   aspectRatio: string;
   index: number;
 }
