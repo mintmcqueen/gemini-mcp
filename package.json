@@ -1,6 +1,6 @@
 {
   "name": "@mintmcqueen/gemini-mcp",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Enhanced MCP server for Google Gemini 3 with Image Generation, Batch API integration (50% cost, async processing), advanced file handling, and conversation management. Features Gemini 3 Pro (default) and Gemini 3 Pro Image models with state-of-the-art reasoning and multimodal capabilities. Supports image generation/editing, 11 batch tools for content generation and embeddings.",
   "type": "module",
   "main": "build/index.js",
@@ -53,7 +53,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@google/genai": "^1.13.0",
+    "@google/genai": "^1.50.1",
     "@modelcontextprotocol/sdk": "^1.17.2"
   },
   "devDependencies": {

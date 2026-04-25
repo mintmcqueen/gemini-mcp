@@ -29,15 +29,13 @@ import {
 import { createPartFromUri } from "@google/genai";
 
 const MODELS = {
-  // Gemini 3 models (newest - default)
-  PRO_3: "gemini-3-pro-preview",
+  // Gemini 3 models (Preview - default chat)
+  PRO_3: "gemini-3.1-pro-preview",
   IMAGE_GEN_3: "gemini-3-pro-image-preview",
-  // Gemini 2.5 models
+  // Gemini 2.5 models (GA)
   PRO_25: "gemini-2.5-pro",
   FLASH_25: "gemini-2.5-flash",
   IMAGE_GEN_25: "gemini-2.5-flash-image",
-  // Gemini 2.0 models
-  FLASH_20: "gemini-2.0-flash-exp",
   // Utility models
   EMBEDDING: "gemini-embedding-001",
 } as const;
@@ -172,7 +170,7 @@ class GeminiMCPServer {
             models: [
               {
                 name: MODELS.PRO_3,
-                description: "Gemini 3 Pro (DEFAULT) - Most intelligent model with state-of-the-art reasoning, multimodal understanding, and agentic capabilities",
+                description: "Gemini 3.1 Pro Preview (DEFAULT) - Latest Gemini 3 series model with state-of-the-art reasoning, multimodal understanding, and agentic capabilities",
                 capabilities: ["text", "images", "video", "audio", "thinking", "tools", "search"],
                 maxTokens: 65536,
                 inputTokenLimit: 1048576,
@@ -204,13 +202,6 @@ class GeminiMCPServer {
                 capabilities: ["text", "images", "image-generation"],
                 maxTokens: 32768,
                 inputTokenLimit: 65536,
-              },
-              {
-                name: MODELS.FLASH_20,
-                description: "Gemini 2.0 Flash - Legacy fast model",
-                capabilities: ["text", "images", "tools"],
-                maxTokens: 8192,
-                inputTokenLimit: 1048576,
               },
             ],
           };
@@ -295,7 +286,7 @@ class GeminiMCPServer {
                 },
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25],
                   description: "The Gemini model to use",
                   default: MODELS.PRO_3,
                 },
@@ -460,7 +451,7 @@ class GeminiMCPServer {
               properties: {
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25],
                   description: "Gemini model for content generation",
                   default: MODELS.FLASH_25,
                 },
@@ -512,7 +503,7 @@ class GeminiMCPServer {
                 },
                 model: {
                   type: "string",
-                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25, MODELS.FLASH_20],
+                  enum: [MODELS.PRO_3, MODELS.PRO_25, MODELS.FLASH_25],
                   description: "Gemini model for content generation",
                   default: MODELS.FLASH_25,
                 },

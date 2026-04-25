@@ -3,9 +3,9 @@
 ## Project Overview
 
 **Name:** gemini-mcp
-**Version:** 0.4.0
+**Version:** 0.5.0
 **Type:** Model Context Protocol (MCP) Server
-**Purpose:** Provides MCP-compliant interface to Google's Gemini AI models including **Gemini 3 Pro** (default), Gemini 2.5 Pro, Gemini 2.5 Flash, and image generation models (Gemini 3 Pro Image, Gemini 2.5 Flash Image) with advanced file handling, conversation management, and multimodal capabilities.
+**Purpose:** Provides MCP-compliant interface to Google's Gemini AI models including **Gemini 3.1 Pro** (default), Gemini 2.5 Pro, Gemini 2.5 Flash, and image generation models (Gemini 3 Pro Image, Gemini 2.5 Flash Image) with advanced file handling, conversation management, and multimodal capabilities.
 
 **Key Value Proposition:**
 - **Gemini 3 Support:** Default to Google's most intelligent model with state-of-the-art reasoning and multimodal understanding
@@ -622,11 +622,25 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 **Last Updated:** 2025-11-26
 **Primary Implementation:** src/index.ts
 **Compiled Output:** build/index.js
-**Package Version:** 0.4.0
+**Package Version:** 0.5.0
 
 ## Recent Improvements
 
-### v0.4.0 - Gemini 3 Support (Current)
+### v0.5.0 - Deprecation Cleanup (Current)
+
+**Why:** As of 2026-04-25, several model IDs in v0.4.0 were retired or about to be retired by Google. This release updates the defaults and drops the dead model.
+
+**Changes:**
+- `MODELS.PRO_3` (default chat): `gemini-3-pro-preview` → `gemini-3.1-pro-preview`. The old ID was shut down 2026-03-09 and now silently redirects to 3.1; making the redirect explicit avoids a surprise breaking change if Google ever drops the redirect. (src/index.ts:33)
+- Removed `MODELS.FLASH_20` (`gemini-2.0-flash-exp`). Deprecated 2026-02-18, scheduled shutdown 2026-06-01. Dropped from the resource listing and from all three chat/batch model enums (src/index.ts:298, 463, 515).
+- `gemini-embedding-001` left in place per user direction (still GA, despite `gemini-embedding-2` being the newer recommendation as of 2026-04-22).
+- `@google/genai` ^1.13.0 → ^1.50.1. Verified no breaking signature changes for `files.upload`, `files.get/list/delete/download`, `batches.create/createEmbeddings/get/cancel/delete`, `models.generateContent`.
+
+**Verification:** End-to-end MCP stdio test confirmed the chat tool routes to `gemini-3.1-pro-preview` and returns a response with thinking tokens (96 thoughtsTokenCount on a trivial prompt), confirming the upgraded endpoint behaves as expected.
+
+**Note:** TypeScript flags `Server` from `@modelcontextprotocol/sdk` as deprecated under the new SDK. Out of scope for this release; track separately.
+
+### v0.4.0 - Gemini 3 Support
 
 **Major Upgrade:** Full support for Google's newest Gemini 3 model family with Gemini 3 Pro as the default model.
 
